@@ -7,17 +7,14 @@ The LLM provider is monkeypatched so no real API call is made.
 """
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.agent.provider import ProviderResponse
 from app.seed import seed_services
-
+from fastapi.testclient import TestClient
 
 SIMPLE_HYPOTHESIS = (
     "HYPOTHESIS:\nHigh error rate observed on checkout-service.\n\n"
     "CONFIDENCE: medium\n"
-    "REASONING: Error rate data shows 18% error rate.\n\n"
-    "PROPOSED_ACTIONS:\nnone"
+    "REASONING: Error rate data shows 18% error rate."
 )
 
 
@@ -26,9 +23,7 @@ def _seed(db_session) -> None:
     seed_services(db_session)
 
 
-def test_investigate_returns_hypothesis(
-    client: TestClient, register, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_investigate_returns_hypothesis(client: TestClient, register, monkeypatch: pytest.MonkeyPatch) -> None:
     headers = register("inv-test@example.com")
 
     # Create incident
