@@ -29,3 +29,8 @@ build/
 *.log
 .coverage
 htmlcov/
+
+# Generated knowledge-graph output (/graphify), not project source.
+# A single generated graph.html alone was 458KB and made GitHub call this
+# an HTML repo despite it being a Python/TypeScript project.
+graphify-out/
