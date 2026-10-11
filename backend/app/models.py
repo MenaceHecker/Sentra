@@ -106,6 +106,7 @@ class Hypothesis(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     incident: Mapped["Incident"] = relationship(back_populates="hypotheses")
+    citations: Mapped[list["HypothesisCitation"]] = relationship(back_populates="hypothesis", cascade="all, delete-orphan")
 
 
 class HypothesisCitation(Base):
@@ -114,6 +115,8 @@ class HypothesisCitation(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     hypothesis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hypotheses.id", ondelete="CASCADE"), nullable=False)
     evidence_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
+
+    hypothesis: Mapped["Hypothesis"] = relationship(back_populates="citations")
 
 
 class RunbookDocument(Base):

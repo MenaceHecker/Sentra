@@ -4,7 +4,7 @@
 
 Connect your system's logs, metrics, and runbooks. When something breaks,
 Sentra investigates via autonomous read-only tool calls, produces an
-evidence-cited root-cause hypothesis, and proposes next actions — but no
+evidence-cited root-cause hypothesis, and proposes next actions but no
 side-effecting action ever executes without explicit human approval.
 
 > Status: early build — see [Roadmap](#roadmap) for what's done vs. planned.
