@@ -41,7 +41,7 @@ def format_metric_evidence(tool_output: dict[str, Any]) -> str:
     avg_v = sum(values) / len(values) if values else None
 
     lines = [
-        f"TYPE: metric",
+        "TYPE: metric",
         f"SERVICE: {service}",
         f"METRIC: {metric}",
         f"WINDOW: {points[0]['timestamp'] if points else 'N/A'} — {points[-1]['timestamp'] if points else 'N/A'}",
