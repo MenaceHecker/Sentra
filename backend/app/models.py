@@ -106,7 +106,9 @@ class Hypothesis(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     incident: Mapped["Incident"] = relationship(back_populates="hypotheses")
-    citations: Mapped[list["HypothesisCitation"]] = relationship(back_populates="hypothesis", cascade="all, delete-orphan")
+    citations: Mapped[list["HypothesisCitation"]] = relationship(
+        back_populates="hypothesis", cascade="all, delete-orphan"
+    )
 
 
 class HypothesisCitation(Base):
