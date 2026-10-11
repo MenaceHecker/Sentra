@@ -69,10 +69,12 @@ uvicorn app.main:app --reload
 Backend runs at `http://localhost:8000`. Check `GET /health`. On startup it
 seeds the three services, ingests the runbooks in `backend/runbooks/` into
 pgvector, and starts pulling logs, metrics, and deploys from the simulated
-system every few seconds. `OPENAI_API_KEY` is optional: without one,
-runbook embeddings fall back to a deterministic hash-based embedding
+system every few seconds. `OPENAI_API_KEY` is optional for runbook search:
+without one, embeddings fall back to a deterministic hash-based embedding
 (`app/embeddings.py`), so search still works with no setup, just with
-keyword-level rather than semantic matching.
+keyword-level rather than semantic matching. It's required, though, to
+actually run `POST /api/incidents/{id}/investigate`, that calls OpenAI
+directly with no fallback.
 
 ### 4. Frontend
 ```bash
@@ -96,7 +98,7 @@ pre-commit install
 - [x] Phase 2 — Simulated system
 - [x] Phase 3 — Ingestion pipeline
 - [x] Phase 4 — Tool layer
-- [ ] Phase 5 — Agent orchestrator
+- [x] Phase 5 — Agent orchestrator
 - [ ] Phase 6 — Approval workflow
 - [ ] Phase 7 — Audit log
 - [ ] Phase 8 — Investigation UI
