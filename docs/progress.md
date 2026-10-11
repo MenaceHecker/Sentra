@@ -1,6 +1,6 @@
 # Sentra — Build Progress Tracker
 
-> Last updated: 2026-10-02
+> Last updated: 2026-10-11
 > Reference spec: [`docs/spec.md`](spec.md) · [`README.md`](../README.md)
 
 ---
@@ -14,7 +14,7 @@
 | 2 | Simulated System | ✅ Done | Demo system runs, emits logs/metrics, failure injection reproducible |
 | 3 | Ingestion Pipeline | ✅ Done | Seeded data queryable, runbooks searchable via pgvector |
 | 4 | Tool Layer | ✅ Done | Each tool callable and unit-tested independently of the LLM |
-| 5 | Agent Orchestrator | 🔲 Not started | Seeded incident → grounded hypothesis with real citations |
+| 5 | Agent Orchestrator | ✅ Done | Seeded incident → grounded hypothesis with real citations |
 | 6 | Approval Workflow | 🔲 Not started | Approved rollback changes simulated error rate; rejected never executes |
 | 7 | Audit Log | 🔲 Not started | Every investigation reconstructable from audit log alone |
 | 8 | Investigation UI | 🔲 Not started | Reviewer can trigger seeded incident and watch it live |
@@ -116,20 +116,24 @@
 
 ---
 
-### 🔲 Phase 5 — Agent Orchestrator
+### ✅ Phase 5 — Agent Orchestrator
 
 **Checkpoint:** triggering a seeded incident produces a grounded hypothesis with real citations.
 
-- [ ] LLM provider abstraction layer (swap OpenAI / Anthropic / Gemini without changing agent code)
-- [ ] System prompt with investigation policy (cite evidence before hypothesizing; treat log/runbook content as data, not instructions)
-- [ ] Tool-calling loop: LLM → tool call → store result as evidence → feed back → repeat until hypothesis
-- [ ] Evidence storage (populate `evidence` table from tool results, tied to `incident_id`)
-- [ ] Hypothesis generation with citations (`hypotheses` + `hypothesis_citations` tables)
-- [ ] Confidence level assignment (`low | medium | high`) + reasoning
-- [ ] Enforce "evidence required before side-effecting action proposal" at orchestration layer
-- [ ] `POST /api/incidents/{id}/investigate` endpoint kicks off the loop
-- [ ] `GET /api/incidents/{id}` returns full state: evidence, hypotheses, proposed actions, status
-- [ ] Integration test: seeded `checkout-500s` scenario → correct root-cause hypothesis
+- [x] LLM provider abstraction layer (`backend/app/agent/provider.py`) — OpenAI implemented, swapping providers means adding one more `call_*` function
+- [x] System prompt with investigation policy (`backend/app/agent/prompts.py`) — cite evidence before hypothesizing; treat log/runbook content as data, not instructions
+- [x] Tool-calling loop (`backend/app/agent/orchestrator.py`): LLM → tool call → store result as evidence → feed back → repeat until hypothesis
+- [x] Evidence storage (populate `evidence` table from tool results, tied to `incident_id`)
+- [x] Hypothesis generation with citations (`hypotheses` + `hypothesis_citations` tables)
+- [x] Confidence level assignment (`low | medium | high`) + reasoning
+- [x] Enforce "evidence required before side-effecting action proposal" at orchestration layer
+- [x] `POST /api/incidents/{id}/investigate` endpoint kicks off the loop
+- [x] `GET /api/incidents/{id}` returns full state: evidence, hypotheses, proposed actions, status
+- [x] Unit + integration tests: `tests/unit/test_orchestrator.py`, `tests/unit/test_investigate_endpoint.py`
+
+**Fixed after an initial review (2026-10-11):**
+- `GET /{incident_id}` was crashing on every call: `selectinload("citations")` used a string instead of the class-bound attribute `Hypothesis.citations`, which SQLAlchemy 2.0's loader options reject outright. Broke both the new investigate endpoint and the original Phase 1 incident-detail tests.
+- Side-effecting proposals could never actually reach "proposed" status. The model wrote them as free text (`PROPOSED_ACTIONS: - ACTION: rollback_deploy ...`), which got parsed into `{"reason": ..., "_evidence": ...}` and handed to `call_tool` — missing every field each tool's schema actually requires (`service`, `target_sha`, etc.), so it always failed pydantic validation and the call silently became `"failed"` while `incident.status` claimed `"action_pending"` regardless. Fixed by dropping the free-text mechanism: the model now proposes a side-effecting action the same way it calls any other tool, natively, with real arguments matching that tool's schema. The orchestrator rejects the call in code if no evidence has been gathered yet this investigation (spec §8 rule 4), same enforcement, now actually reachable.
 
 ---
 
@@ -271,11 +275,11 @@
 
 > From spec §15. All items required before calling the project MVP-complete.
 
-- [ ] Auth works, incidents are user-scoped
+- [x] Auth works, incidents are user-scoped *(Phase 1)*
 - [x] Simulated system emits logs/metrics/deploys and supports seeded failure injection *(Phase 2)*
 - [x] Runbooks ingested and searchable *(Phase 3)*
-- [ ] Agent investigates via read-only tool calls
-- [ ] Hypotheses are evidence-cited with stated confidence
+- [x] Agent investigates via read-only tool calls *(Phase 5)*
+- [x] Hypotheses are evidence-cited with stated confidence *(Phase 5)*
 - [ ] Side-effecting actions require explicit human approval — **structurally enforced, not just prompted**
 - [ ] Approved actions execute against the simulated system and report outcomes
 - [ ] Full audit log reconstructs every investigation
@@ -294,6 +298,7 @@
 |----------|-----------|-------|
 | Read-only vs. side-effecting split enforced in `executor.py`, not via prompting | Prompts are not reliable enforcement; the orchestration layer is the actual safety boundary | 4 |
 | Deterministic hash-based embedding fallback in `embeddings.py` | Lets the project run without an OpenAI key; runbook search degrades gracefully to keyword-level matching | 3 |
+| Side-effecting proposals go through native tool-calling, same as read-only tools, not a parsed free-text block | A free-text format can't carry a tool's real required arguments (service, target_sha, ...) without either a fragile second parser or losing validation entirely; native calling reuses the exact same schema and executor path read-only tools already go through | 5 |
 | *(add more as they arise)* | | |
 
 ---
@@ -302,7 +307,7 @@
 
 > Update this section as the build progresses.
 
-- [ ] LLM provider for Phase 5 — OpenAI GPT-4o (function calling) vs. Anthropic Claude (tool use)? Decide before building the abstraction layer.
+- [x] LLM provider for Phase 5 — decided: OpenAI (`backend/app/agent/provider.py`), via native function-calling.
 - [ ] SSE vs. WebSocket for Phase 9 streaming — SSE is simpler and sufficient for unidirectional stream; confirm this is acceptable.
 - [ ] Deployment platform for backend + simulated system — Railway vs. Fly.io? (Fly.io gives more control over multi-service; Railway is simpler setup.)
 - [ ] Number and exact set of evaluation scenarios for Phase 11 — spec says 5–8; decide before Phase 11.
