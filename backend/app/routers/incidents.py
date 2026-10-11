@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import Incident, User
+from app.models import Hypothesis, Incident, User
 from app.schemas import IncidentCreate, IncidentDetailOut, IncidentOut, InvestigateResponse
 
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
@@ -27,7 +27,7 @@ def _load_incident_detail(db: Session, incident_id: uuid.UUID, user_id: uuid.UUI
         .options(
             selectinload(Incident.evidence),
             selectinload(Incident.tool_calls),
-            selectinload(Incident.hypotheses).selectinload("citations"),
+            selectinload(Incident.hypotheses).selectinload(Hypothesis.citations),
         )
         .filter(Incident.id == incident_id)
         .first()
@@ -110,8 +110,7 @@ def investigate_incident(
             events_summary.append(f"tool_call: {event.tool_name}{side}")
         elif isinstance(event, HypothesisEvent):
             events_summary.append(
-                f"hypothesis: confidence={event.confidence} "
-                f"proposed_actions={len(event.proposed_actions)}"
+                f"hypothesis: confidence={event.confidence} " f"proposed_actions={len(event.proposed_actions)}"
             )
         elif isinstance(event, ErrorEvent):
             error_message = event.message
