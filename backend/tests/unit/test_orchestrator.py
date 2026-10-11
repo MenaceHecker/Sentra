@@ -10,12 +10,9 @@ The tests verify:
   6. The parse_final_response helper extracts all structured fields.
 """
 
-import json
 import uuid
 
 import pytest
-from sqlalchemy.orm import Session
-
 from app.agent.orchestrator import (
     ErrorEvent,
     HypothesisEvent,
@@ -26,7 +23,7 @@ from app.agent.orchestrator import (
 from app.agent.provider import ProviderResponse, ToolCallRequest
 from app.models import Evidence, Hypothesis, Incident, ToolCall, User
 from app.seed import seed_services
-
+from sqlalchemy.orm import Session
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,36 +57,11 @@ The error logs show NullPointerException in PaymentProcessor.
 
 CONFIDENCE: high
 REASONING: Deploy timestamp closely precedes error spike; runbook section 12-40 describes this exact pattern.
-
-PROPOSED_ACTIONS:
-- ACTION: rollback_deploy
-  REASON: Deploy a1b2c3 introduced the error
-  EVIDENCE: deploy record sha=a1b2c3 at 14:29; error spike at 14:32
 """
     result = _parse_final_response(text)
     assert "checkout service" in result["summary"]
     assert result["confidence"] == "high"
     assert "Deploy timestamp" in result["reasoning"]
-    assert len(result["proposed_actions"]) == 1
-    action = result["proposed_actions"][0]
-    assert action["action"] == "rollback_deploy"
-    assert "a1b2c3" in action["evidence"]
-
-
-def test_parse_no_proposed_actions() -> None:
-    text = """
-HYPOTHESIS:
-High memory usage, no clear root cause yet.
-
-CONFIDENCE: low
-REASONING: Need more data.
-
-PROPOSED_ACTIONS:
-none
-"""
-    result = _parse_final_response(text)
-    assert result["proposed_actions"] == []
-    assert result["confidence"] == "low"
 
 
 def test_parse_fallback_for_unstructured_response() -> None:
@@ -128,11 +100,7 @@ class _MockProvider:
 GOOD_HYPOTHESIS = (
     "HYPOTHESIS:\nThe error spike at 14:32 followed deploy a1b2c3 by three minutes.\n\n"
     "CONFIDENCE: high\n"
-    "REASONING: Strong temporal correlation; runbook confirms this pattern.\n\n"
-    "PROPOSED_ACTIONS:\n"
-    "- ACTION: rollback_deploy\n"
-    "  REASON: Deploy a1b2c3 introduced the error\n"
-    "  EVIDENCE: deploy sha=a1b2c3; error spike at 14:32"
+    "REASONING: Strong temporal correlation; runbook confirms this pattern."
 )
 
 
@@ -166,9 +134,7 @@ def test_successful_investigation_produces_hypothesis(db_session: Session, monke
     assert hyp_events[0].confidence == "high"
 
 
-def test_evidence_is_stored_for_each_executed_tool_call(
-    db_session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_evidence_is_stored_for_each_executed_tool_call(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     seed_services(db_session)
     incident = _make_incident(db_session)
 
@@ -182,10 +148,7 @@ def test_evidence_is_stored_for_each_executed_tool_call(
                 ],
             ),
             ProviderResponse(
-                content=(
-                    "HYPOTHESIS:\nSomething broke.\n\nCONFIDENCE: low\n"
-                    "REASONING: Limited data.\n\nPROPOSED_ACTIONS:\nnone"
-                ),
+                content="HYPOTHESIS:\nSomething broke.\n\nCONFIDENCE: low\nREASONING: Limited data.",
                 tool_calls=[],
             ),
         ]
@@ -219,40 +182,98 @@ def test_hypothesis_is_stored_in_db(db_session: Session, monkeypatch: pytest.Mon
 def test_side_effecting_proposal_without_evidence_is_rejected(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Spec §8 rule 4: a side-effecting proposal with no cited evidence must
-    be rejected at the orchestration layer before reaching the UI.
+    """Spec §8 rule 4: a side-effecting proposal is a real tool call, same
+    mechanism as a read-only one. If the model calls one before gathering
+    any evidence this investigation, it must be rejected at the
+    orchestration layer, before a human ever sees it.
     """
     seed_services(db_session)
     incident = _make_incident(db_session)
 
-    bad_hypothesis = (
-        "HYPOTHESIS:\nSomething is wrong.\n\nCONFIDENCE: low\nREASONING: Gut feeling.\n\n"
-        "PROPOSED_ACTIONS:\n"
-        "- ACTION: rollback_deploy\n"
-        "  REASON: Just try it\n"
-        "  EVIDENCE: "  # empty evidence
+    # The model's very first move is a side-effecting call, no evidence yet.
+    _MockProvider.reset(
+        [
+            ProviderResponse(
+                content=None,
+                tool_calls=[
+                    _make_tool_call_req(
+                        "rollback_deploy",
+                        {"service": "checkout-service", "target_sha": "a1b2c3", "reason": "just try it"},
+                    )
+                ],
+            ),
+            ProviderResponse(
+                content="HYPOTHESIS:\nSomething is wrong.\n\nCONFIDENCE: low\nREASONING: Gut feeling.",
+                tool_calls=[],
+            ),
+        ]
     )
-    _MockProvider.reset([ProviderResponse(content=bad_hypothesis, tool_calls=[])])
+    monkeypatch.setattr("app.agent.orchestrator.call_llm", _MockProvider.call)
+
+    events = list(run_investigation(db_session, incident))
+
+    tool_events = [e for e in events if isinstance(e, ToolCallEvent)]
+    hyp_events = [e for e in events if isinstance(e, HypothesisEvent)]
+    assert tool_events[0].status == "failed"
+    assert len(hyp_events[0].proposed_actions) == 0
+
+    rollback_call = (
+        db_session.query(ToolCall)
+        .filter(ToolCall.incident_id == incident.id, ToolCall.tool_name == "rollback_deploy")
+        .one()
+    )
+    assert rollback_call.status == "failed"
+    assert "no evidence" in rollback_call.tool_output_json
+
+    db_session.refresh(incident)
+    assert incident.status == "hypothesis_ready"
+
+
+def test_side_effecting_proposal_with_evidence_is_proposed(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The mirror case: evidence gathered first, then a side-effecting call
+    should actually make it to "proposed" and surface for human review.
+    """
+    seed_services(db_session)
+    incident = _make_incident(db_session)
+
+    _MockProvider.reset(
+        [
+            ProviderResponse(
+                content=None,
+                tool_calls=[_make_tool_call_req("get_service_status", {"service": "checkout-service"})],
+            ),
+            ProviderResponse(
+                content=None,
+                tool_calls=[
+                    _make_tool_call_req(
+                        "rollback_deploy",
+                        {"service": "checkout-service", "target_sha": "a1b2c3", "reason": "deploy caused the spike"},
+                    )
+                ],
+            ),
+            ProviderResponse(content=GOOD_HYPOTHESIS, tool_calls=[]),
+        ]
+    )
     monkeypatch.setattr("app.agent.orchestrator.call_llm", _MockProvider.call)
 
     events = list(run_investigation(db_session, incident))
 
     hyp_events = [e for e in events if isinstance(e, HypothesisEvent)]
-    assert len(hyp_events) == 1
-    # Action should be filtered out (no evidence text and no evidence rows)
-    assert len(hyp_events[0].proposed_actions) == 0
+    assert len(hyp_events[0].proposed_actions) == 1
+    assert hyp_events[0].proposed_actions[0]["tool_name"] == "rollback_deploy"
 
-    # Also verify no rollback_deploy ToolCall was written as a proposal
-    proposed_calls = (
+    rollback_call = (
         db_session.query(ToolCall)
-        .filter(
-            ToolCall.incident_id == incident.id,
-            ToolCall.tool_name == "rollback_deploy",
-            ToolCall.status == "proposed",
-        )
-        .all()
+        .filter(ToolCall.incident_id == incident.id, ToolCall.tool_name == "rollback_deploy")
+        .one()
     )
-    assert len(proposed_calls) == 0
+    assert rollback_call.status == "proposed"
+    assert rollback_call.tool_output_json is None  # never executed, just recorded
+
+    db_session.refresh(incident)
+    assert incident.status == "action_pending"
 
 
 def test_llm_error_yields_error_event(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,9 +292,7 @@ def test_llm_error_yields_error_event(db_session: Session, monkeypatch: pytest.M
     assert "API quota exceeded" in error_events[0].message
 
 
-def test_investigation_respects_max_iterations_cap(
-    db_session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_investigation_respects_max_iterations_cap(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     """If the model keeps requesting tools without ever producing a final
     response, the orchestrator must stop after MAX_TOOL_ITERATIONS.
     """
@@ -307,8 +326,7 @@ def test_incident_status_updates_correctly(db_session: Session, monkeypatch: pyt
 
     # No proposed actions → status should be hypothesis_ready
     no_action_hypothesis = (
-        "HYPOTHESIS:\nNormal traffic spike.\n\nCONFIDENCE: medium\n"
-        "REASONING: No anomalous deploys found.\n\nPROPOSED_ACTIONS:\nnone"
+        "HYPOTHESIS:\nNormal traffic spike.\n\nCONFIDENCE: medium\nREASONING: No anomalous deploys found."
     )
     _MockProvider.reset([ProviderResponse(content=no_action_hypothesis, tool_calls=[])])
     monkeypatch.setattr("app.agent.orchestrator.call_llm", _MockProvider.call)
