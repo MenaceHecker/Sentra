@@ -1,6 +1,6 @@
 # Sentra — Build Progress Tracker
 
-> Last updated: 2026-10-11
+> Last updated: 2026-10-12
 > Reference spec: [`docs/spec.md`](spec.md) · [`README.md`](../README.md)
 
 ---
@@ -15,7 +15,7 @@
 | 3 | Ingestion Pipeline | ✅ Done | Seeded data queryable, runbooks searchable via pgvector |
 | 4 | Tool Layer | ✅ Done | Each tool callable and unit-tested independently of the LLM |
 | 5 | Agent Orchestrator | ✅ Done | Seeded incident → grounded hypothesis with real citations |
-| 6 | Approval Workflow | 🔲 Not started | Approved rollback changes simulated error rate; rejected never executes |
+| 6 | Approval Workflow | ✅ Done | Approved rollback changes simulated error rate; rejected never executes |
 | 7 | Audit Log | 🔲 Not started | Every investigation reconstructable from audit log alone |
 | 8 | Investigation UI | 🔲 Not started | Reviewer can trigger seeded incident and watch it live |
 | 9 | Streaming + Polish | 🔲 Not started | Investigation feels live, not spinner-then-dump |
@@ -137,19 +137,20 @@
 
 ---
 
-### 🔲 Phase 6 — Approval Workflow
+### ✅ Phase 6 — Approval Workflow
 
 **Checkpoint:** an approved rollback actually changes the simulated system's error rate; a rejected action never executes.
 
-- [ ] Proposed-action generation from the agent loop → `tool_calls` rows with `status=proposed`
-- [ ] `POST /api/incidents/{id}/actions/{action_id}/approve` endpoint
-- [ ] `POST /api/incidents/{id}/actions/{action_id}/reject` endpoint
-- [ ] Approval triggers actual side-effecting tool execution against the simulated system
-- [ ] Rejection writes a rejection record; tool is permanently blocked from executing
-- [ ] Outcome of approved action fed back to the agent (did the error rate change?)
-- [ ] Incident status transitions: `investigating → hypothesis_ready → action_pending → resolved`
-- [ ] Integration test: approve rollback → simulated system error rate drops
-- [ ] Integration test: reject action → no execution; try to call execute directly → still blocked
+- [x] Proposed-action generation from the agent loop → `tool_calls` rows with `status=proposed` *(Phase 5)*
+- [x] `POST /api/incidents/{id}/actions/{action_id}/approve` endpoint (`backend/app/routers/incidents.py`)
+- [x] `POST /api/incidents/{id}/actions/{action_id}/reject` endpoint, same file
+- [x] Approval triggers actual side-effecting tool execution against the simulated system (`execute_approved_call` in `backend/app/tools/executor.py`)
+- [x] Rejection writes `status=rejected` + `decided_at`/`decided_by_user_id`; permanently blocked, there's no path back to `proposed`
+- [x] Outcome of approved action recorded on the ToolCall itself (`tool_output_json`, `status=executed|failed`) and in an `AuditLog` entry
+- [x] Incident status transitions: resolved when the last pending action is approved and executes successfully, hypothesis_ready when the last pending action is rejected or fails, stays action_pending while other proposals are still open
+- [x] Found that restart_service and rollback_deploy were pure stubs with zero connection to the simulated system (see `backend/app/tools/side_effecting.py` before this phase). Both now call a new `SimSystemClient.reset_scenario`, the only real remediation lever the simulated system exposes — in this simulated world there's no meaningful difference between "restart fixed it" and "rollback fixed it," both just mean "the injected failure is gone now." `post_status_update` has nothing to call (no status page/chat integration exists in scope) so it just records the message.
+- [x] Verified live by hand against a real running simulated system, not just mocked tests: injected `checkout-500s`, confirmed `degraded` + ~35% error rate, called the real `/approve` endpoint, confirmed `healthy` + ~1-2% error rate within seconds. Separately confirmed a real `/reject` call leaves the simulated system completely untouched (still degraded).
+- [x] Unit + integration tests: `tests/unit/test_approval_endpoint.py`, additions to `tests/unit/test_tools_executor.py` and `tests/unit/test_tools_side_effecting.py`
 
 ---
 
@@ -280,8 +281,8 @@
 - [x] Runbooks ingested and searchable *(Phase 3)*
 - [x] Agent investigates via read-only tool calls *(Phase 5)*
 - [x] Hypotheses are evidence-cited with stated confidence *(Phase 5)*
-- [ ] Side-effecting actions require explicit human approval — **structurally enforced, not just prompted**
-- [ ] Approved actions execute against the simulated system and report outcomes
+- [x] Side-effecting actions require explicit human approval — **structurally enforced, not just prompted** *(Phase 6)*
+- [x] Approved actions execute against the simulated system and report outcomes *(Phase 6)*
 - [ ] Full audit log reconstructs every investigation
 - [ ] Investigation UI works end to end for a reviewer with no setup
 - [ ] Security tests pass, including an explicit "can the approval gate be bypassed" test
@@ -299,6 +300,8 @@
 | Read-only vs. side-effecting split enforced in `executor.py`, not via prompting | Prompts are not reliable enforcement; the orchestration layer is the actual safety boundary | 4 |
 | Deterministic hash-based embedding fallback in `embeddings.py` | Lets the project run without an OpenAI key; runbook search degrades gracefully to keyword-level matching | 3 |
 | Side-effecting proposals go through native tool-calling, same as read-only tools, not a parsed free-text block | A free-text format can't carry a tool's real required arguments (service, target_sha, ...) without either a fragile second parser or losing validation entirely; native calling reuses the exact same schema and executor path read-only tools already go through | 5 |
+| restart_service and rollback_deploy both just clear the active scenario on the simulated system, there's no distinct "restart" mechanism | The simulated system only exposes one remediation lever. Modeling two fake distinct effects would be dishonest about what's actually happening; the point being demonstrated is the approval gate, not remediation-technique realism | 6 |
+| Approve is one endpoint, not approve-then-separately-execute | Spec §10 only defines approve/reject; the Phase 6 checkpoint is that approval changes something, immediately, not that it gets queued for a third step | 6 |
 | *(add more as they arise)* | | |
 
 ---
