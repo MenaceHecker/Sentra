@@ -128,3 +128,29 @@ class RunbookSearchResultOut(BaseModel):
     end_line: int
     content: str
     distance: float
+
+
+class ScenarioOut(BaseModel):
+    """Mirrors the simulated system's own ScenarioOut, proxied through so
+    the frontend never talks to the simulated system directly."""
+
+    id: str
+    title: str
+    service: str
+    description: str
+    active: bool
+
+
+class ScenarioDeployOut(BaseModel):
+    sha: str
+    service: str
+    message: str
+    deployed_at: datetime
+    deployed_by: str
+
+
+class InjectScenarioResponse(BaseModel):
+    scenario_id: str
+    service: str
+    injected_at: datetime
+    deploy: ScenarioDeployOut | None = None
