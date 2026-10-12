@@ -87,7 +87,10 @@ npm install
 cp ../.env.example .env.local   # keep only NEXT_PUBLIC_API_URL
 npm run dev
 ```
-Frontend runs at `http://localhost:3000`.
+Frontend runs at `http://localhost:3000`. Sign up, then on the dashboard
+pick a seeded scenario and click "Trigger incident", it injects the
+failure into the simulated system and opens an investigation for it.
+Click Investigate, then approve or reject whatever it proposes.
 
 ### 5. Pre-commit hooks
 ```bash
@@ -105,7 +108,7 @@ pre-commit install
 - [x] Phase 5 — Agent orchestrator
 - [x] Phase 6 — Approval workflow
 - [x] Phase 7 — Audit log
-- [ ] Phase 8 — Investigation UI
+- [x] Phase 8 — Investigation UI
 - [ ] Phase 9 — Streaming + polish
 - [ ] Phase 10 — Security + reliability
 - [ ] Phase 11 — Evaluation
