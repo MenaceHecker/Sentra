@@ -1,5 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import { AuthProvider } from "@/lib/auth";
+import { Nav } from "@/components/Nav";
 
 export const metadata: Metadata = {
   title: "Sentra",
@@ -14,7 +16,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-white text-slate-900 antialiased">{children}</body>
+      <body className="bg-white text-slate-900 antialiased">
+        <AuthProvider>
+          <Nav />
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   );
 }
