@@ -47,7 +47,8 @@ from sqlalchemy.orm import Session
 from app.agent.context import format_tool_result_for_context
 from app.agent.prompts import build_initial_messages, build_tool_schemas
 from app.agent.provider import ProviderResponse, call_llm
-from app.models import AuditLog, Evidence, Hypothesis, HypothesisCitation, Incident, ToolCall
+from app.audit import write_audit, write_status_change
+from app.models import Evidence, Hypothesis, HypothesisCitation, Incident, ToolCall
 from app.tools.executor import call_tool
 
 logger = logging.getLogger(__name__)
@@ -206,17 +207,6 @@ def _summarise_tool_output(tool_name: str, output: dict[str, Any]) -> str:
     return f"Tool {tool_name} result"
 
 
-def _write_audit(db: Session, incident_id: uuid.UUID, action: str, detail: dict) -> None:
-    db.add(
-        AuditLog(
-            incident_id=incident_id,
-            actor="system",
-            action=action,
-            detail_json=json.dumps(detail, default=str),
-        )
-    )
-
-
 # ---------------------------------------------------------------------------
 # Main orchestrator
 # ---------------------------------------------------------------------------
@@ -240,10 +230,12 @@ def run_investigation(
     logger.info("Investigation started | incident_id=%s", incident_id)
 
     # Update incident status
+    old_status = incident.status
     incident.status = "investigating"
     db.flush()
 
-    _write_audit(db, incident_id, "investigation_started", {"incident_id": str(incident_id)})
+    write_audit(db, incident_id, "system", "investigation_started", {"incident_title": incident.title})
+    write_status_change(db, incident_id, "system", old_status, incident.status)
 
     # Build the conversation and tool schemas
     messages = build_initial_messages(incident.title, incident.description)
@@ -265,6 +257,7 @@ def run_investigation(
             response: ProviderResponse = call_llm(messages, tool_schemas)
         except Exception as exc:
             logger.exception("LLM call failed | incident_id=%s", incident_id)
+            write_audit(db, incident_id, "system", "llm_error", {"message": str(exc), "iteration": iterations})
             incident.status = "investigating"  # leave open for retry
             db.commit()
             yield ErrorEvent(message=f"LLM error: {exc}")
@@ -324,13 +317,19 @@ def run_investigation(
             elif tool_call_row.status == "proposed" and tool_call_row.is_side_effecting:
                 proposed_tool_calls.append(tool_call_row)
 
-            _write_audit(
+            # Snapshot the actual input and output here, not just status
+            # and an id, so the audit trail alone has everything needed to
+            # reconstruct what happened even if tool_calls changed later.
+            write_audit(
                 db,
                 incident_id,
+                "system",
                 "tool_call",
                 {
                     "tool_call_id": str(tool_call_row.id),
                     "tool_name": tc_req.name,
+                    "tool_input": tc_req.arguments,
+                    "tool_output": output,
                     "status": tool_call_row.status,
                     "is_side_effecting": tool_call_row.is_side_effecting,
                 },
@@ -395,6 +394,7 @@ def run_investigation(
     final_text = response.content or ""
 
     if not final_text.strip():
+        write_audit(db, incident_id, "system", "llm_error", {"message": "no hypothesis text after tool calls"})
         incident.status = "investigating"
         db.commit()
         yield ErrorEvent(message="Model returned no hypothesis text after tool calls.")
@@ -419,20 +419,25 @@ def run_investigation(
     # Update incident status. proposed_tool_calls only holds side-effecting
     # calls that are still "proposed", the ones the evidence check above
     # didn't downgrade to "failed" (see the tool-call loop).
+    old_status = incident.status
     incident.status = "action_pending" if proposed_tool_calls else "hypothesis_ready"
     incident.resolved_at = None  # clear any stale value
 
-    _write_audit(
+    write_audit(
         db,
         incident_id,
+        "system",
         "hypothesis_generated",
         {
             "hypothesis_id": str(hypothesis.id),
+            "summary": parsed["summary"],
             "confidence": parsed["confidence"],
+            "reasoning": parsed["reasoning"],
             "evidence_count": len(all_evidence),
-            "proposed_actions": len(proposed_tool_calls),
+            "proposed_action_ids": [str(tc.id) for tc in proposed_tool_calls],
         },
     )
+    write_status_change(db, incident_id, "system", old_status, incident.status)
 
     db.commit()
     logger.info(
