@@ -72,9 +72,13 @@ pgvector, and starts pulling logs, metrics, and deploys from the simulated
 system every few seconds. `OPENAI_API_KEY` is optional for runbook search:
 without one, embeddings fall back to a deterministic hash-based embedding
 (`app/embeddings.py`), so search still works with no setup, just with
-keyword-level rather than semantic matching. It's required, though, to
-actually run `POST /api/incidents/{id}/investigate`, that calls OpenAI
-directly with no fallback.
+keyword-level rather than semantic matching. Actually running
+`POST /api/incidents/{id}/investigate`, though, needs a real key: set
+`LLM_PROVIDER` to `openai` or `gemini` and fill in the matching `*_API_KEY`,
+there's no fallback for that call. Gemini has a genuinely free tier (Google
+AI Studio, no card needed); stick to a `*-flash-lite` model if you're on it,
+flagship models get a tiny daily quota and model names churn fast enough
+that it's worth checking `client.models.list()` if a model 404s on you.
 
 ### 4. Frontend
 ```bash
