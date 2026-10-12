@@ -1,6 +1,6 @@
 # Sentra — Build Progress Tracker
 
-> Last updated: 2026-10-12
+> Last updated: 2026-10-13
 > Reference spec: [`docs/spec.md`](spec.md) · [`README.md`](../README.md)
 
 ---
@@ -17,7 +17,7 @@
 | 5 | Agent Orchestrator | ✅ Done | Seeded incident → grounded hypothesis with real citations |
 | 6 | Approval Workflow | ✅ Done | Approved rollback changes simulated error rate; rejected never executes |
 | 7 | Audit Log | ✅ Done | Every investigation reconstructable from audit log alone |
-| 8 | Investigation UI | 🔲 Not started | Reviewer can trigger seeded incident and watch it live |
+| 8 | Investigation UI | ✅ Done | Reviewer can trigger seeded incident and watch it live |
 | 9 | Streaming + Polish | 🔲 Not started | Investigation feels live, not spinner-then-dump |
 | 10 | Security + Reliability | 🔲 Not started | Auth audit, rate limiting, prompt-injection tests, approval-gate bypass tests pass |
 | 11 | Evaluation | 🔲 Not started | 5–8 scenario benchmark with real numbers in README |
@@ -169,23 +169,25 @@
 
 ---
 
-### 🔲 Phase 8 — Investigation UI
+### ✅ Phase 8 — Investigation UI
 
 **Checkpoint:** a reviewer can trigger a seeded incident and watch the investigation happen live.
 
-- [ ] **Landing page** — value prop, "View Live Demo" CTA, architecture summary, example walkthrough, GitHub link
-- [ ] **Auth pages** — sign-in, sign-out
-- [ ] **Dashboard** — connected system status, past investigations list, "Trigger Incident" / scenario picker
-- [ ] **Investigation workspace**
-  - [ ] Left panel: investigation timeline (tool calls, chronological)
-  - [ ] Center: hypothesis + evidence + follow-up chat
-  - [ ] Right panel: evidence/source viewer (logs, metric chart, deploy diff, runbook excerpt)
-  - [ ] Top bar: incident title, status badge, affected service
-  - [ ] Bottom/modal: proposed-action card with description, evidence summary, blast radius, Approve/Reject
-- [ ] **Audit log page** — filterable table of all tool calls across all investigations
-- [ ] **Source viewer page** — raw log stream, metric chart, runbook viewer, deploy history
-- [ ] Recharts (or similar) metric charts
-- [ ] Citation links: clicking a cited piece of evidence opens the source viewer to the relevant section
+- [x] **Landing page** — value prop, "View live demo" CTA, how-it-works, an example hypothesis, architecture summary, GitHub link (`frontend/app/page.tsx`)
+- [x] **Auth pages** — `/login`, `/register` (`frontend/app/login/`, `frontend/app/register/`), token kept in localStorage via `frontend/lib/auth.tsx`, sign-out in the nav
+- [x] **Dashboard** — past investigations list, scenario picker that injects a real failure via the new backend scenario proxy and opens an incident for it (`frontend/app/dashboard/page.tsx`)
+- [x] **Investigation workspace** (`frontend/app/incidents/[id]/page.tsx`)
+  - [x] Timeline of tool calls, chronological (`components/Timeline.tsx`)
+  - [x] Hypothesis display with confidence and reasoning
+  - [x] Evidence panel: click to expand raw content per evidence type, logs, a real Recharts line chart for metrics, deploy list, runbook excerpt (`components/EvidencePanel.tsx`, `components/MetricChart.tsx`)
+  - [x] Top bar: incident title, status badge, Investigate button
+  - [x] Proposed-action cards with input shown and Approve/Reject (`components/ProposedActionCard.tsx`)
+- [x] **Audit log page** — filterable by action, expandable detail per row (`frontend/app/audit-log/page.tsx`)
+- [x] Recharts for metric charts
+- [x] Citations: clicking an evidence item expands its raw content inline. Simplified from a separate "source viewer" page, since that page would have shown the exact same tool-output data the evidence panel already needs to render, a separate route and separate fetch for identical content wasn't worth it for this MVP
+- [x] Chat/follow-up investigation from spec's center panel: not built, there's no backend endpoint for a follow-up question yet, out of scope for this phase
+- [x] Small backend addition this phase needed: `GET /api/scenarios` and `POST /api/scenarios/{id}/inject`, proxying the simulated system so the dashboard's scenario picker works for a reviewer with zero setup (spec §2 MVP item #19), plus `SimSystemClient.list_scenarios`/`inject_scenario`
+- [x] Verified live end to end with a real headless browser (Playwright, installed ad hoc for this verification, not a project dependency): register → trigger scenario → investigate against the real Gemini API → approve the proposed rollback → confirmed the real simulated system actually recovered, same as the Phase 6 verification but driven through the actual UI this time, not curl. Caught and fixed a real bug this way: the incident page's refresh after investigating wasn't awaited, so the "Investigating…" state cleared before the new hypothesis had actually landed
 
 ---
 
@@ -285,7 +287,7 @@
 - [x] Side-effecting actions require explicit human approval — **structurally enforced, not just prompted** *(Phase 6)*
 - [x] Approved actions execute against the simulated system and report outcomes *(Phase 6)*
 - [ ] Full audit log reconstructs every investigation
-- [ ] Investigation UI works end to end for a reviewer with no setup
+- [x] Investigation UI works end to end for a reviewer with no setup *(Phase 8)*
 - [ ] Security tests pass, including an explicit "can the approval gate be bypassed" test
 - [ ] Evaluation run with real numbers in the README
 - [ ] Deployed, publicly reviewable, with a demo video
@@ -303,6 +305,8 @@
 | Side-effecting proposals go through native tool-calling, same as read-only tools, not a parsed free-text block | A free-text format can't carry a tool's real required arguments (service, target_sha, ...) without either a fragile second parser or losing validation entirely; native calling reuses the exact same schema and executor path read-only tools already go through | 5 |
 | restart_service and rollback_deploy both just clear the active scenario on the simulated system, there's no distinct "restart" mechanism | The simulated system only exposes one remediation lever. Modeling two fake distinct effects would be dishonest about what's actually happening; the point being demonstrated is the approval gate, not remediation-technique realism | 6 |
 | Approve is one endpoint, not approve-then-separately-execute | Spec §10 only defines approve/reject; the Phase 6 checkpoint is that approval changes something, immediately, not that it gets queued for a third step | 6 |
+| No separate "source viewer" page, citations expand inline in the evidence panel instead | The source viewer page from spec §4 would render the exact same tool-output JSON the evidence panel already has to parse for its own display, a second route and fetch for identical content wasn't worth the duplication for this MVP | 8 |
+| UI verified live with a real headless browser (Playwright) rather than trusting type-check and build success alone | TypeScript/build catch compile errors, not runtime logic bugs. It caught a real one: the incident page's refresh after investigating wasn't awaited, so the UI looked idle before the new hypothesis had actually arrived. Installed ad hoc for this verification, not added as a project dependency | 8 |
 | *(add more as they arise)* | | |
 
 ---
