@@ -4,18 +4,27 @@ Phase 5 additions:
   - GET /{id}     now returns IncidentDetailOut (evidence + hypotheses + tool calls)
   - POST /{id}/investigate  runs the agent loop synchronously and returns the result
 
+Phase 6 additions:
+  - POST /{id}/actions/{action_id}/approve  approves AND executes a proposed
+    side-effecting call in one step (see app/tools/executor.py)
+  - POST /{id}/actions/{action_id}/reject   rejects it, permanently, it can
+    never be approved after this
+
 Phase 9 will convert POST /{id}/investigate to SSE streaming.
 """
 
+import json
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import Hypothesis, Incident, User
-from app.schemas import IncidentCreate, IncidentDetailOut, IncidentOut, InvestigateResponse
+from app.models import AuditLog, Hypothesis, Incident, ToolCall, User
+from app.schemas import IncidentCreate, IncidentDetailOut, IncidentOut, InvestigateResponse, ToolCallOut
+from app.tools.executor import execute_approved_call
 
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
 
@@ -122,3 +131,120 @@ def investigate_incident(
     # Reload with full detail for the response
     detail = _load_incident_detail(db, incident_id, current_user.id)
     return InvestigateResponse(incident=detail, events_summary=events_summary)
+
+
+def _get_proposed_action(db: Session, incident_id: uuid.UUID, action_id: uuid.UUID) -> ToolCall:
+    """Looks up a proposed side-effecting ToolCall scoped to this incident.
+    Same 404-not-403 reasoning as everywhere else: a 400/403 would confirm
+    the action exists at all, even for the wrong incident."""
+    call = db.get(ToolCall, action_id)
+    if call is None or call.incident_id != incident_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Proposed action not found")
+    if not call.is_side_effecting:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "This tool call was never a proposal, there's nothing to decide"
+        )
+    if call.status != "proposed":
+        raise HTTPException(status.HTTP_409_CONFLICT, f"This action was already decided (status: {call.status})")
+    return call
+
+
+def _other_pending_actions_remain(db: Session, incident_id: uuid.UUID, deciding_action_id: uuid.UUID) -> bool:
+    return (
+        db.query(ToolCall)
+        .filter(
+            ToolCall.incident_id == incident_id,
+            ToolCall.id != deciding_action_id,
+            ToolCall.is_side_effecting.is_(True),
+            ToolCall.status == "proposed",
+        )
+        .first()
+        is not None
+    )
+
+
+@router.post("/{incident_id}/actions/{action_id}/approve", response_model=ToolCallOut)
+def approve_action(
+    incident_id: uuid.UUID,
+    action_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ToolCall:
+    """Approves a proposed side-effecting action and executes it immediately
+    in the same request. There's no separate "execute" step: spec Section
+    10 only defines approve/reject, and the Phase 6 checkpoint is that an
+    approved rollback actually changes things, not that it gets queued for
+    something else to run later.
+    """
+    incident = db.get(Incident, incident_id)
+    if incident is None or incident.user_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Incident not found")
+
+    call = _get_proposed_action(db, incident_id, action_id)
+
+    call.status = "approved"
+    call.decided_at = datetime.now(UTC)
+    call.decided_by_user_id = current_user.id
+    db.flush()
+
+    execute_approved_call(db, call)
+
+    db.add(
+        AuditLog(
+            incident_id=incident_id,
+            actor="user",
+            action="action_approved",
+            detail_json=json.dumps({"tool_call_id": str(call.id), "tool_name": call.tool_name, "outcome": call.status}),
+        )
+    )
+
+    if not _other_pending_actions_remain(db, incident_id, call.id):
+        if call.status == "executed":
+            incident.status = "resolved"
+            incident.resolved_at = datetime.now(UTC)
+        else:
+            # Approved, but execution failed. Nothing to action on anymore,
+            # but the incident is not resolved, it needs another look.
+            incident.status = "hypothesis_ready"
+
+    db.commit()
+    db.refresh(call)
+    return call
+
+
+@router.post("/{incident_id}/actions/{action_id}/reject", response_model=ToolCallOut)
+def reject_action(
+    incident_id: uuid.UUID,
+    action_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ToolCall:
+    """Rejects a proposed action. Permanently: a rejected call's status
+    never becomes "proposed" again, there's no undo endpoint. It never
+    executes, full stop, regardless of what anything else requests later.
+    """
+    incident = db.get(Incident, incident_id)
+    if incident is None or incident.user_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Incident not found")
+
+    call = _get_proposed_action(db, incident_id, action_id)
+
+    call.status = "rejected"
+    call.decided_at = datetime.now(UTC)
+    call.decided_by_user_id = current_user.id
+
+    db.add(
+        AuditLog(
+            incident_id=incident_id,
+            actor="user",
+            action="action_rejected",
+            detail_json=json.dumps({"tool_call_id": str(call.id), "tool_name": call.tool_name}),
+        )
+    )
+
+    if not _other_pending_actions_remain(db, incident_id, call.id):
+        incident.status = "hypothesis_ready"
+
+    db.commit()
+    db.refresh(call)
+    return call
