@@ -10,6 +10,9 @@ Phase 6 additions:
   - POST /{id}/actions/{action_id}/reject   rejects it, permanently, it can
     never be approved after this
 
+Phase 7 additions:
+  - GET /{id}/audit-log  every AuditLog row for this incident, oldest first
+
 Phase 9 will convert POST /{id}/investigate to SSE streaming.
 """
 
@@ -20,10 +23,11 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
+from app.audit import write_audit, write_status_change
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import AuditLog, Hypothesis, Incident, ToolCall, User
-from app.schemas import IncidentCreate, IncidentDetailOut, IncidentOut, InvestigateResponse, ToolCallOut
+from app.schemas import AuditLogOut, IncidentCreate, IncidentDetailOut, IncidentOut, InvestigateResponse, ToolCallOut
 from app.tools.executor import execute_approved_call
 
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
@@ -189,15 +193,22 @@ def approve_action(
 
     execute_approved_call(db, call)
 
-    db.add(
-        AuditLog(
-            incident_id=incident_id,
-            actor="user",
-            action="action_approved",
-            detail_json=json.dumps({"tool_call_id": str(call.id), "tool_name": call.tool_name, "outcome": call.status}),
-        )
+    write_audit(
+        db,
+        incident_id,
+        "user",
+        "action_approved",
+        {
+            "tool_call_id": str(call.id),
+            "tool_name": call.tool_name,
+            "tool_input": json.loads(call.tool_input_json),
+            "decided_by_user_id": str(current_user.id),
+            "outcome": call.status,
+            "output": json.loads(call.tool_output_json) if call.tool_output_json else None,
+        },
     )
 
+    old_status = incident.status
     if not _other_pending_actions_remain(db, incident_id, call.id):
         if call.status == "executed":
             incident.status = "resolved"
@@ -206,6 +217,7 @@ def approve_action(
             # Approved, but execution failed. Nothing to action on anymore,
             # but the incident is not resolved, it needs another look.
             incident.status = "hypothesis_ready"
+    write_status_change(db, incident_id, "user", old_status, incident.status)
 
     db.commit()
     db.refresh(call)
@@ -233,18 +245,43 @@ def reject_action(
     call.decided_at = datetime.now(UTC)
     call.decided_by_user_id = current_user.id
 
-    db.add(
-        AuditLog(
-            incident_id=incident_id,
-            actor="user",
-            action="action_rejected",
-            detail_json=json.dumps({"tool_call_id": str(call.id), "tool_name": call.tool_name}),
-        )
+    write_audit(
+        db,
+        incident_id,
+        "user",
+        "action_rejected",
+        {
+            "tool_call_id": str(call.id),
+            "tool_name": call.tool_name,
+            "tool_input": json.loads(call.tool_input_json),
+            "decided_by_user_id": str(current_user.id),
+        },
     )
 
+    old_status = incident.status
     if not _other_pending_actions_remain(db, incident_id, call.id):
         incident.status = "hypothesis_ready"
+    write_status_change(db, incident_id, "user", old_status, incident.status)
 
     db.commit()
     db.refresh(call)
     return call
+
+
+@router.get("/{incident_id}/audit-log", response_model=list[AuditLogOut])
+def get_audit_log(
+    incident_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[AuditLog]:
+    """Every audit entry for this incident, oldest first, so reading top to
+    bottom tells the whole story: investigation started, each tool call
+    with its real input and output, the hypothesis that came out of it,
+    and every human decision after that. This is the Phase 7 checkpoint:
+    an investigation should be reconstructable from this list alone.
+    """
+    incident = db.get(Incident, incident_id)
+    if incident is None or incident.user_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Incident not found")
+
+    return db.query(AuditLog).filter(AuditLog.incident_id == incident_id).order_by(AuditLog.created_at.asc()).all()
