@@ -103,7 +103,7 @@ pre-commit install
 - [x] Phase 3 — Ingestion pipeline
 - [x] Phase 4 — Tool layer
 - [x] Phase 5 — Agent orchestrator
-- [ ] Phase 6 — Approval workflow
+- [x] Phase 6 — Approval workflow
 - [ ] Phase 7 — Audit log
 - [ ] Phase 8 — Investigation UI
 - [ ] Phase 9 — Streaming + polish
