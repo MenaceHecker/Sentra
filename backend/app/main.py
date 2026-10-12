@@ -12,7 +12,7 @@ from app.db import SessionLocal, engine
 from app.embeddings import get_embedding_provider
 from app.ingestion.pipeline import run_ingestion_cycle
 from app.ingestion.sim_client import SimSystemClient
-from app.routers import auth, incidents, runbooks
+from app.routers import audit, auth, incidents, runbooks
 from app.runbooks import ingest_all_runbooks
 from app.seed import seed_services
 
@@ -74,6 +74,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(incidents.router)
 app.include_router(runbooks.router)
+app.include_router(audit.router)
 
 
 @app.get("/health")
