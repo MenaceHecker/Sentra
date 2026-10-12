@@ -68,3 +68,30 @@ def call_tool(db: Session, incident_id: uuid.UUID, tool_name: str, tool_input: d
     db.commit()
     db.refresh(call)
     return call
+
+
+def execute_approved_call(db: Session, call: ToolCall) -> ToolCall:
+    """Runs a side-effecting tool call a human has just approved. This is
+    the only place a side-effecting tool's implementation ever actually
+    runs, separate from call_tool() above on purpose: call_tool's whole
+    job is deciding whether a NEW call gets to run immediately or just
+    gets written down, and a side-effecting call always takes the second
+    path there. This function is what finishes the job later, once a
+    human approval record exists, called only from the approve endpoint
+    after it has already stamped decided_at/decided_by_user_id. It does
+    not commit, the caller controls that transaction so the approval
+    decision, the execution outcome, and the incident status update all
+    land together or not at all."""
+    tool = TOOLS[call.tool_name]
+    validated_input = tool.input_model.model_validate(json.loads(call.tool_input_json))
+
+    try:
+        output = tool.run(db, validated_input)
+        call.tool_output_json = json.dumps(output, default=str)
+        call.status = "executed"
+    except Exception as exc:
+        call.tool_output_json = json.dumps({"error": str(exc)})
+        call.status = "failed"
+    call.executed_at = datetime.now(UTC)
+
+    return call
