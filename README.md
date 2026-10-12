@@ -104,7 +104,7 @@ pre-commit install
 - [x] Phase 4 — Tool layer
 - [x] Phase 5 — Agent orchestrator
 - [x] Phase 6 — Approval workflow
-- [ ] Phase 7 — Audit log
+- [x] Phase 7 — Audit log
 - [ ] Phase 8 — Investigation UI
 - [ ] Phase 9 — Streaming + polish
 - [ ] Phase 10 — Security + reliability
