@@ -62,6 +62,17 @@ class SimSystemClient:
         response = self._client.post(f"/scenarios/{scenario_id}/reset")
         response.raise_for_status()
 
+    def list_scenarios(self) -> list[dict[str, Any]]:
+        return self._get("/scenarios")
+
+    def inject_scenario(self, scenario_id: str) -> dict[str, Any]:
+        """Used by the dashboard's "trigger incident" flow, so a reviewer
+        can start a seeded failure themselves instead of needing to curl
+        the simulated system directly."""
+        response = self._client.post(f"/scenarios/{scenario_id}/inject")
+        response.raise_for_status()
+        return response.json()
+
     def _get(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         response = self._client.get(path, params=params)
         response.raise_for_status()
