@@ -103,6 +103,17 @@ class InvestigateResponse(BaseModel):
     events_summary: list[str]  # human-readable event log for the UI
 
 
+class AuditLogOut(BaseModel):
+    id: uuid.UUID
+    incident_id: uuid.UUID
+    actor: str  # system | user
+    action: str
+    detail_json: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class RunbookDocumentOut(BaseModel):
     id: uuid.UUID
     title: str
