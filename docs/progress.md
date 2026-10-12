@@ -16,7 +16,7 @@
 | 4 | Tool Layer | ✅ Done | Each tool callable and unit-tested independently of the LLM |
 | 5 | Agent Orchestrator | ✅ Done | Seeded incident → grounded hypothesis with real citations |
 | 6 | Approval Workflow | ✅ Done | Approved rollback changes simulated error rate; rejected never executes |
-| 7 | Audit Log | 🔲 Not started | Every investigation reconstructable from audit log alone |
+| 7 | Audit Log | ✅ Done | Every investigation reconstructable from audit log alone |
 | 8 | Investigation UI | 🔲 Not started | Reviewer can trigger seeded incident and watch it live |
 | 9 | Streaming + Polish | 🔲 Not started | Investigation feels live, not spinner-then-dump |
 | 10 | Security + Reliability | 🔲 Not started | Auth audit, rate limiting, prompt-injection tests, approval-gate bypass tests pass |
@@ -154,17 +154,18 @@
 
 ---
 
-### 🔲 Phase 7 — Audit Log
+### ✅ Phase 7 — Audit Log
 
 **Checkpoint:** every investigation reconstructable end-to-end from the audit log alone.
 
-- [ ] `audit_log` table entries written for every tool call (input + output captured before LLM sees result)
-- [ ] Approval and rejection events written to audit log with actor + timestamp
-- [ ] Incident status-change events written to audit log
-- [ ] `GET /api/incidents/{id}/audit-log` endpoint
-- [ ] Global audit log endpoint (`GET /api/audit-log`) filterable by investigation, action type, status
-- [ ] Audit entries immutable — no UPDATE/DELETE paths in code
-- [ ] Test: reconstruct a full investigation from audit log entries alone
+- [x] `audit_log` table entries written for every tool call, now with the actual input and output snapshotted into `detail_json`, not just a status string and an id (`backend/app/agent/orchestrator.py`)
+- [x] Approval and rejection events written to audit log with actor + timestamp, including the tool input and (for approvals) the execution output (`backend/app/routers/incidents.py`)
+- [x] Incident status-change events written to audit log as their own `status_changed` entries, everywhere `incident.status` gets set (orchestrator start/end, approve, reject)
+- [x] `GET /api/incidents/{id}/audit-log` endpoint, oldest first
+- [x] Global audit log endpoint (`GET /api/audit-log`), filterable by `incident_id` and `action`, scoped to the current user's own incidents (joins through `Incident` since `audit_log` has no `user_id` of its own)
+- [x] Audit entries immutable — there's simply no UPDATE/DELETE code path anywhere for `AuditLog`, every write goes through one `write_audit()` function in the new `backend/app/audit.py` that only ever INSERTs
+- [x] Test: `test_investigation_is_fully_reconstructable_from_audit_log_alone` runs a real (mocked-LLM) investigation plus a rejection, then asserts the full story, hypothesis text, confidence, rejected tool name and input, is readable from the audit log response alone, with no join back to `tool_calls` or `hypotheses`
+- [x] Pulled the duplicated inline `AuditLog(...)` construction out of `orchestrator.py` and `incidents.py` into one shared module, so there's one place that decides what an audit entry looks like
 
 ---
 
