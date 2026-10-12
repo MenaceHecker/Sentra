@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
 
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.5-flash-lite"
+
     sim_system_base_url: str = "http://localhost:9000"
 
     # Background jobs (ingestion from the simulated system, runbook seeding).
