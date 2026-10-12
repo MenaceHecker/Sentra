@@ -48,6 +48,20 @@ class SimSystemClient:
     def get_deploys(self, service: str) -> list[dict[str, Any]]:
         return self._get(f"/services/{service}/deploys")
 
+    def get_service(self, service: str) -> dict[str, Any]:
+        """Single-service detail, including active_scenario_id. Used by the
+        approval workflow to find what's actually degrading a service
+        before trying to clear it (see app/tools/side_effecting.py)."""
+        response = self._client.get(f"/services/{service}")
+        response.raise_for_status()
+        return response.json()
+
+    def reset_scenario(self, scenario_id: str) -> None:
+        """Clears whatever failure scenario is active, the only real lever
+        the simulated system exposes for an approved action to pull."""
+        response = self._client.post(f"/scenarios/{scenario_id}/reset")
+        response.raise_for_status()
+
     def _get(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         response = self._client.get(path, params=params)
         response.raise_for_status()
