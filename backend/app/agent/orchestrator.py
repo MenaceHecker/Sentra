@@ -376,6 +376,7 @@ def run_investigation(
                             "name": tc_req.name,
                             "arguments": json.dumps(tc_req.arguments),
                         },
+                        "provider_metadata": tc_req.provider_metadata,
                     }
                     for tc_req, _ in tool_results
                 ],
