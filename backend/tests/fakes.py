@@ -14,7 +14,10 @@ class FakeSimSystemClient:
     metrics_by_service: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     deploys_by_service: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     services_by_name: dict[str, dict[str, Any]] = field(default_factory=dict)
+    scenarios: list[dict[str, Any]] = field(default_factory=list)
+    inject_responses_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
     reset_scenario_calls: list[str] = field(default_factory=list)
+    inject_scenario_calls: list[str] = field(default_factory=list)
 
     def get_logs(self, service: str, since: datetime | None = None) -> list[dict[str, Any]]:
         return self._filtered(self.logs_by_service.get(service, []), since)
@@ -30,6 +33,13 @@ class FakeSimSystemClient:
 
     def reset_scenario(self, scenario_id: str) -> None:
         self.reset_scenario_calls.append(scenario_id)
+
+    def list_scenarios(self) -> list[dict[str, Any]]:
+        return self.scenarios
+
+    def inject_scenario(self, scenario_id: str) -> dict[str, Any]:
+        self.inject_scenario_calls.append(scenario_id)
+        return self.inject_responses_by_id[scenario_id]
 
     def close(self) -> None:
         pass
