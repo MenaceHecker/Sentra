@@ -135,3 +135,58 @@ def test_every_tool_call_is_persisted_before_it_runs(db_session: Session) -> Non
     call_tool(db_session, incident.id, "get_metrics", {"service": "checkout-service"})
 
     assert len(incident.tool_calls) == 1
+
+
+def test_execute_approved_call_runs_the_real_implementation(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 6: once a human approves, execute_approved_call is what
+    actually runs the side-effecting tool, unlike call_tool which stops
+    at "proposed" for these."""
+    from app.tools import side_effecting
+    from app.tools.executor import execute_approved_call
+
+    from tests.fakes import FakeSimSystemClient
+
+    fake_client = FakeSimSystemClient(
+        services_by_name={"checkout-service": {"name": "checkout-service", "active_scenario_id": "checkout-500s"}}
+    )
+    monkeypatch.setattr(side_effecting, "SimSystemClient", lambda base_url=None: fake_client)
+
+    seed_services(db_session)
+    incident = _make_incident(db_session)
+    call = call_tool(
+        db_session, incident.id, "rollback_deploy", {"service": "checkout-service", "target_sha": "a1", "reason": "r"}
+    )
+    assert call.status == "proposed"  # sanity check: call_tool itself never runs this
+
+    execute_approved_call(db_session, call)
+
+    assert call.status == "executed"
+    assert call.executed_at is not None
+    output = json.loads(call.tool_output_json)
+    assert output["reset_scenario"] is True
+    assert fake_client.reset_scenario_calls == ["checkout-500s"]
+
+
+def test_execute_approved_call_records_failure_instead_of_raising(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.tools import side_effecting
+    from app.tools.executor import execute_approved_call
+
+    def _broken_client(base_url: str | None = None):
+        raise ConnectionError("simulated system unreachable")
+
+    monkeypatch.setattr(side_effecting, "SimSystemClient", _broken_client)
+
+    seed_services(db_session)
+    incident = _make_incident(db_session)
+    call = call_tool(
+        db_session, incident.id, "rollback_deploy", {"service": "checkout-service", "target_sha": "a1", "reason": "r"}
+    )
+
+    execute_approved_call(db_session, call)
+
+    assert call.status == "failed"
+    assert "simulated system unreachable" in json.loads(call.tool_output_json)["error"]
