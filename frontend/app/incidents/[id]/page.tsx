@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -10,13 +10,21 @@ import { ProposedActionCard } from "@/components/ProposedActionCard";
 import * as api from "@/lib/api";
 import type { IncidentDetailOut } from "@/lib/types";
 
+interface LiveEvent {
+  id: string;
+  kind: "tool_call" | "hypothesis" | "error";
+  label: string;
+}
+
 function InvestigationWorkspace() {
   const params = useParams();
   const incidentId = params.id as string;
 
   const [incident, setIncident] = useState<IncidentDetailOut | null>(null);
   const [investigating, setInvestigating] = useState(false);
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -28,17 +36,47 @@ function InvestigationWorkspace() {
 
   useEffect(() => {
     refresh();
+    return () => abortRef.current?.abort();
   }, [refresh]);
 
   async function handleInvestigate() {
     setInvestigating(true);
     setError(null);
+    setLiveEvents([]);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      // investigateIncident already returns the full refreshed incident,
-      // using it directly avoids a redundant GET and, more importantly, a
-      // gap where "Investigating…" clears before the new hypothesis has
-      // actually landed in state.
-      const response = await api.investigateIncident(incidentId);
+      // streamInvestigation resolves with the fully refreshed incident once
+      // the "done" event arrives, so setting it directly avoids a redundant
+      // GET. Along the way, onToolCall/onHypothesis/onError fill liveEvents
+      // so the timeline updates as each step actually happens instead of
+      // sitting on a spinner until the whole investigation finishes.
+      const response = await api.streamInvestigation(
+        incidentId,
+        {
+          onToolCall: (event) => {
+            const side = event.status === "proposed" ? " (awaiting approval)" : "";
+            setLiveEvents((prev) => [
+              ...prev,
+              { id: event.tool_call_id, kind: "tool_call", label: `${event.tool_name}${side}` },
+            ]);
+          },
+          onHypothesis: (event) => {
+            setLiveEvents((prev) => [
+              ...prev,
+              {
+                id: event.hypothesis_id,
+                kind: "hypothesis",
+                label: `Hypothesis formed (confidence: ${event.confidence})`,
+              },
+            ]);
+          },
+          onError: (event) => {
+            setLiveEvents((prev) => [...prev, { id: `error-${prev.length}`, kind: "error", label: event.message }]);
+          },
+        },
+        controller.signal,
+      );
       setIncident(response.incident);
     } catch (err) {
       setError(
@@ -48,6 +86,8 @@ function InvestigationWorkspace() {
       );
     } finally {
       setInvestigating(false);
+      setLiveEvents([]);
+      abortRef.current = null;
     }
   }
 
@@ -90,7 +130,7 @@ function InvestigationWorkspace() {
             disabled={investigating}
             className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
           >
-            {investigating ? "Investigating… (this can take up to 30s)" : "Investigate"}
+            {investigating ? "Investigating…" : "Investigate"}
           </button>
         )}
       </div>
@@ -101,6 +141,25 @@ function InvestigationWorkspace() {
         <div className="lg:col-span-1">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Timeline</h2>
           <div className="mt-3">
+            {investigating && liveEvents.length > 0 && (
+              <ul className="mb-3 space-y-1.5 border-b border-dashed border-slate-200 pb-3 text-sm">
+                {liveEvents.map((event, i) => (
+                  <li
+                    key={`${event.id}-${i}`}
+                    className={`flex items-center gap-1.5 ${
+                      event.kind === "error" ? "text-red-600" : "text-slate-600"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                        event.kind === "error" ? "bg-red-500" : "bg-slate-400"
+                      }`}
+                    />
+                    {event.label}
+                  </li>
+                ))}
+              </ul>
+            )}
             <Timeline toolCalls={incident.tool_calls} />
           </div>
         </div>
