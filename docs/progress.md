@@ -18,7 +18,7 @@
 | 6 | Approval Workflow | ✅ Done | Approved rollback changes simulated error rate; rejected never executes |
 | 7 | Audit Log | ✅ Done | Every investigation reconstructable from audit log alone |
 | 8 | Investigation UI | ✅ Done | Reviewer can trigger seeded incident and watch it live |
-| 9 | Streaming + Polish | 🔲 Not started | Investigation feels live, not spinner-then-dump |
+| 9 | Streaming + Polish | ✅ Done | Investigation feels live, not spinner-then-dump |
 | 10 | Security + Reliability | 🔲 Not started | Auth audit, rate limiting, prompt-injection tests, approval-gate bypass tests pass |
 | 11 | Evaluation | 🔲 Not started | 5–8 scenario benchmark with real numbers in README |
 | 12 | Deployment | 🔲 Not started | Public demo works end-to-end with no developer assistance |
@@ -191,17 +191,21 @@
 
 ---
 
-### 🔲 Phase 9 — Streaming + Polish
+### ✅ Phase 9 — Streaming + Polish
 
 **Checkpoint:** investigation feels live, not like a spinner-then-dump.
 
-- [ ] SSE (`text/event-stream`) on `POST /api/incidents/{id}/investigate` — stream each tool call + partial evidence as it happens
-- [ ] Frontend SSE consumer — appends timeline entries in real time
-- [ ] Loading states for all async operations
-- [ ] Error states (LLM error, tool failure, network error) with graceful UI fallback
-- [ ] Empty states (no past investigations, no evidence yet)
-- [ ] Responsive layout (tablet-friendly at minimum)
-- [ ] Keyboard-accessible approve/reject flow
+- [x] `POST /api/incidents/{id}/investigate` converted to SSE (`sse-starlette`'s `EventSourceResponse`) — streams a `tool_call` event per tool call, a `hypothesis` event when one's produced, an `error` event on failure, and a final `done` event carrying the fully reloaded incident plus the same `events_summary` the old synchronous response used to return (`backend/app/routers/incidents.py`)
+- [x] `run_investigation`'s blocking sync generator (real HTTP calls to the LLM and the simulated system between yields) wrapped with Starlette's `iterate_in_threadpool` so each step runs in a worker thread and the event loop stays free to flush chunks as they're produced, instead of buffering the whole investigation before sending anything
+- [x] Errors reported in-band as `error` SSE events rather than an HTTP error status: the response is already committed to 200 once streaming starts, so there's no status code left to carry a failure that happens partway through
+- [x] Frontend SSE consumer (`frontend/lib/api.ts`'s `streamInvestigation`) — hand-rolled `fetch()` + `ReadableStream` reader instead of the native `EventSource`, since `EventSource` is GET-only and can't send the `Authorization` header this API needs for a POST
+- [x] Incident page (`frontend/app/incidents/[id]/page.tsx`) renders a live feed of tool-call/hypothesis labels above the Timeline as they stream in, then swaps to the full DB-backed Timeline/Evidence/Hypothesis render once the `done` event lands — verified live (Playwright) that tool-call labels actually appear several seconds apart, not all at once
+- [x] Dashboard's incident list fetch failure and "no incidents yet" were previously conflated into the same empty-array state; now tracked as separate `incidentsError` state so a real fetch failure shows an error message instead of silently looking like an empty account (`frontend/app/dashboard/page.tsx`)
+- [x] Audit log's expandable row was a `<tr onClick>` with no keyboard path; added `role="button"`, `tabIndex`, `aria-expanded`, and an Enter/Space `onKeyDown` handler, verified live that both keys toggle it (`frontend/app/audit-log/page.tsx`)
+- [x] Responsive layout audited at 768px (tablet) width on dashboard, incident workspace, and audit log — no horizontal overflow on any of them, verified via Playwright
+- [x] Dependency note: latest `sse-starlette` (3.1.0+) raised its `starlette` floor past what `fastapi==0.115.0` allows; pinned to `sse-starlette==3.0.0`, the last release before that floor, rather than bumping FastAPI ~28 minor versions just for this
+- [x] Verified live end to end (Playwright): register → trigger scenario → click Investigate → watch tool-call labels stream in over several seconds → hypothesis and a proposed `rollback_deploy` action land → full Timeline/Evidence render takes over. Confirmed via curl with per-line timestamps that SSE chunks genuinely arrive progressively (spread over ~3s), not buffered as one blob at the end
+- [ ] Chat/follow-up investigation and non-SSE-related polish items remain out of scope, same as noted in Phase 8
 
 ---
 
@@ -307,6 +311,8 @@
 | Approve is one endpoint, not approve-then-separately-execute | Spec §10 only defines approve/reject; the Phase 6 checkpoint is that approval changes something, immediately, not that it gets queued for a third step | 6 |
 | No separate "source viewer" page, citations expand inline in the evidence panel instead | The source viewer page from spec §4 would render the exact same tool-output JSON the evidence panel already has to parse for its own display, a second route and fetch for identical content wasn't worth the duplication for this MVP | 8 |
 | UI verified live with a real headless browser (Playwright) rather than trusting type-check and build success alone | TypeScript/build catch compile errors, not runtime logic bugs. It caught a real one: the incident page's refresh after investigating wasn't awaited, so the UI looked idle before the new hypothesis had actually arrived. Installed ad hoc for this verification, not added as a project dependency | 8 |
+| `sse-starlette` pinned to `3.0.0` rather than the latest `3.5.0` | `sse-starlette>=3.1.0` requires `starlette>=0.49.1`, which conflicts with `fastapi==0.115.0`'s `starlette<0.39.0` pin; `3.0.0` is the last release before that floor was raised. Bumping FastAPI ~28 minor versions just to unblock an SSE library felt disproportionate to this phase's scope | 9 |
+| Investigate endpoint always sends a final `done` event with the full incident, even after an `error` event | Errors happen mid-stream, after the HTTP status is already committed to 200, so there's no response left to fail outright the way the old synchronous endpoint's 502 did. Always syncing the client to real DB state on stream end, success or failure, is simpler than the client guessing whether to re-fetch | 9 |
 | *(add more as they arise)* | | |
 
 ---
@@ -316,6 +322,6 @@
 > Update this section as the build progresses.
 
 - [x] LLM provider for Phase 5 — decided: OpenAI (`backend/app/agent/provider.py`), via native function-calling.
-- [ ] SSE vs. WebSocket for Phase 9 streaming — SSE is simpler and sufficient for unidirectional stream; confirm this is acceptable.
+- [x] SSE vs. WebSocket for Phase 9 streaming — went with SSE: the investigation stream is unidirectional (server → client), and the browser's native reconnect/simplicity benefits of SSE aren't even in play here since the custom `fetch()`-based consumer was needed anyway for the `Authorization` header.
 - [ ] Deployment platform for backend + simulated system — Railway vs. Fly.io? (Fly.io gives more control over multi-service; Railway is simpler setup.)
 - [ ] Number and exact set of evaluation scenarios for Phase 11 — spec says 5–8; decide before Phase 11.
