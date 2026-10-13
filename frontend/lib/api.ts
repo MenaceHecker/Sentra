@@ -4,6 +4,9 @@ import type {
   IncidentOut,
   InjectScenarioResponse,
   InvestigateResponse,
+  InvestigationErrorEvent,
+  InvestigationHypothesisEvent,
+  InvestigationToolCallEvent,
   RunbookSearchResultOut,
   ScenarioOut,
   Token,
@@ -115,8 +118,96 @@ export function getIncident(id: string): Promise<IncidentDetailOut> {
   return apiFetch<IncidentDetailOut>(`/api/incidents/${id}`);
 }
 
-export function investigateIncident(id: string): Promise<InvestigateResponse> {
-  return apiFetch<InvestigateResponse>(`/api/incidents/${id}/investigate`, { method: "POST" });
+export interface InvestigationStreamHandlers {
+  onToolCall?: (event: InvestigationToolCallEvent) => void;
+  onHypothesis?: (event: InvestigationHypothesisEvent) => void;
+  onError?: (event: InvestigationErrorEvent) => void;
+}
+
+// Native EventSource can't do this: it's GET-only and can't send the
+// Authorization header, but /investigate is a POST that needs a bearer
+// token. So this reads the response body as a stream by hand and parses
+// SSE frames itself. Resolves with the final "done" event's payload, which
+// carries the fully refreshed incident, so the caller doesn't need a
+// separate GET once the stream ends.
+export async function streamInvestigation(
+  id: string,
+  handlers: InvestigationStreamHandlers,
+  signal?: AbortSignal,
+): Promise<InvestigateResponse> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${API_URL}/api/incidents/${id}/investigate`, {
+    method: "POST",
+    headers,
+    signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      message = JSON.parse(text).detail ?? text;
+    } catch {
+      // not JSON, use the raw text
+    }
+    throw new ApiError(res.status, message || `API error ${res.status}`);
+  }
+  if (!res.body) {
+    throw new ApiError(0, "Streaming not supported by this browser");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let done: InvestigateResponse | null = null;
+
+  while (true) {
+    const { done: streamDone, value } = await reader.read();
+    if (streamDone) break;
+    // Normalize CRLF (sse-starlette's default line separator) to LF so
+    // frame/line splitting below doesn't need to care which one it got.
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+
+    for (const frame of frames) {
+      let eventType = "message";
+      const dataLines: string[] = [];
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+      if (dataLines.length === 0) continue;
+      const data = JSON.parse(dataLines.join("\n"));
+
+      switch (eventType) {
+        case "tool_call":
+          handlers.onToolCall?.(data as InvestigationToolCallEvent);
+          break;
+        case "hypothesis":
+          handlers.onHypothesis?.(data as InvestigationHypothesisEvent);
+          break;
+        case "error":
+          handlers.onError?.(data as InvestigationErrorEvent);
+          break;
+        case "done":
+          done = data as InvestigateResponse;
+          break;
+      }
+    }
+  }
+
+  if (done === null) {
+    throw new ApiError(0, "Investigation stream ended without a result");
+  }
+  return done;
 }
 
 export function approveAction(incidentId: string, actionId: string) {
