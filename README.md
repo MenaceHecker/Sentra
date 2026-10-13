@@ -109,7 +109,7 @@ pre-commit install
 - [x] Phase 6 — Approval workflow
 - [x] Phase 7 — Audit log
 - [x] Phase 8 — Investigation UI
-- [ ] Phase 9 — Streaming + polish
+- [x] Phase 9 — Streaming + polish
 - [ ] Phase 10 — Security + reliability
 - [ ] Phase 11 — Evaluation
 - [ ] Phase 12 — Deployment
