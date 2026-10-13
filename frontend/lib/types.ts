@@ -80,6 +80,29 @@ export interface InvestigateResponse {
   events_summary: string[];
 }
 
+// SSE events yielded by POST /api/incidents/{id}/investigate (Phase 9).
+// A "done" event always carries an InvestigateResponse as its final state.
+
+export interface InvestigationToolCallEvent {
+  tool_call_id: string;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  status: ToolCallStatus;
+  output_summary: string;
+}
+
+export interface InvestigationHypothesisEvent {
+  hypothesis_id: string;
+  summary: string;
+  confidence: Confidence;
+  reasoning: string;
+  proposed_actions: Record<string, unknown>[];
+}
+
+export interface InvestigationErrorEvent {
+  message: string;
+}
+
 export interface AuditLogOut {
   id: string;
   incident_id: string;
