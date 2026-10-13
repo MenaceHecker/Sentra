@@ -2,7 +2,7 @@
 
 Phase 5 additions:
   - GET /{id}     now returns IncidentDetailOut (evidence + hypotheses + tool calls)
-  - POST /{id}/investigate  runs the agent loop synchronously and returns the result
+  - POST /{id}/investigate  runs the agent loop and returns the result
 
 Phase 6 additions:
   - POST /{id}/actions/{action_id}/approve  approves AND executes a proposed
@@ -13,7 +13,9 @@ Phase 6 additions:
 Phase 7 additions:
   - GET /{id}/audit-log  every AuditLog row for this incident, oldest first
 
-Phase 9 will convert POST /{id}/investigate to SSE streaming.
+Phase 9 additions:
+  - POST /{id}/investigate now streams over SSE instead of blocking for the
+    whole investigation and returning one JSON blob at the end.
 """
 
 import json
@@ -22,7 +24,10 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
+from sse_starlette.sse import EventSourceResponse
+from starlette.concurrency import iterate_in_threadpool
 
+from app.agent.orchestrator import ErrorEvent, HypothesisEvent, ToolCallEvent, run_investigation
 from app.audit import write_audit, write_status_change
 from app.db import get_db
 from app.deps import get_current_user
@@ -84,24 +89,52 @@ def get_incident(
     return _load_incident_detail(db, incident_id, current_user.id)
 
 
-@router.post("/{incident_id}/investigate", response_model=InvestigateResponse)
-def investigate_incident(
+def _tool_call_event_payload(event: ToolCallEvent) -> dict:
+    return {
+        "tool_call_id": str(event.tool_call_id),
+        "tool_name": event.tool_name,
+        "tool_input": event.tool_input,
+        "status": event.status,
+        "output_summary": event.output_summary,
+    }
+
+
+def _hypothesis_event_payload(event: HypothesisEvent) -> dict:
+    return {
+        "hypothesis_id": str(event.hypothesis_id),
+        "summary": event.summary,
+        "confidence": event.confidence,
+        "reasoning": event.reasoning,
+        "proposed_actions": event.proposed_actions,
+    }
+
+
+@router.post("/{incident_id}/investigate")
+async def investigate_incident(
     incident_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> InvestigateResponse:
-    """Run the agent investigation loop for an incident.
+) -> EventSourceResponse:
+    """Streams the agent investigation loop for an incident over SSE.
 
-    Synchronous for now (Phase 5).  Phase 9 will add SSE streaming.
+    One "tool_call" event per tool call and one "hypothesis" event when the
+    model produces one, both as they happen rather than all at once at the
+    end. An "error" event if a step fails. Always ends with a "done" event
+    carrying the fully reloaded incident plus the same events_summary the
+    old synchronous response used to return, so the client has one place to
+    get the authoritative final state without a separate GET.
 
-    The incident must belong to the requesting user and must be in a state
-    where investigation makes sense (investigating or hypothesis_ready for
-    follow-up questions).  Once a loop is running, the endpoint returns only
-    after the model is done — typically 10-30 seconds depending on the number
-    of tool calls and LLM latency.
+    Errors are reported in-band as "error" events, not as an HTTP error
+    status: the response is already committed to 200 by the time streaming
+    starts, so there's no HTTP status left to carry a failure that happens
+    partway through.
+
+    run_investigation is a plain sync generator that does blocking HTTP
+    calls (to the LLM, to the simulated system) between yields.
+    iterate_in_threadpool runs each step in a worker thread so the event
+    loop stays free to actually flush each chunk to the client as it's
+    produced, instead of buffering everything until the whole loop finishes.
     """
-    from app.agent.orchestrator import ErrorEvent, HypothesisEvent, ToolCallEvent, run_investigation
-
     # Ownership check (returns 404, not 403, to avoid confirming IDs exist)
     incident = db.get(Incident, incident_id)
     if incident is None or incident.user_id != current_user.id:
@@ -113,28 +146,28 @@ def investigate_incident(
             f"Incident is already {incident.status} — create a new incident to re-investigate.",
         )
 
-    # Run the investigation loop (generator exhausted synchronously here)
-    events_summary: list[str] = []
-    error_message: str | None = None
+    async def event_stream():
+        events_summary: list[str] = []
 
-    for event in run_investigation(db, incident):
-        if isinstance(event, ToolCallEvent):
-            side = " [side-effecting, awaiting approval]" if event.status == "proposed" else ""
-            events_summary.append(f"tool_call: {event.tool_name}{side}")
-        elif isinstance(event, HypothesisEvent):
-            events_summary.append(
-                f"hypothesis: confidence={event.confidence} " f"proposed_actions={len(event.proposed_actions)}"
-            )
-        elif isinstance(event, ErrorEvent):
-            error_message = event.message
-            events_summary.append(f"error: {event.message}")
+        async for event in iterate_in_threadpool(run_investigation(db, incident)):
+            if isinstance(event, ToolCallEvent):
+                side = " [side-effecting, awaiting approval]" if event.status == "proposed" else ""
+                events_summary.append(f"tool_call: {event.tool_name}{side}")
+                yield {"event": "tool_call", "data": json.dumps(_tool_call_event_payload(event))}
+            elif isinstance(event, HypothesisEvent):
+                events_summary.append(
+                    f"hypothesis: confidence={event.confidence} proposed_actions={len(event.proposed_actions)}"
+                )
+                yield {"event": "hypothesis", "data": json.dumps(_hypothesis_event_payload(event))}
+            elif isinstance(event, ErrorEvent):
+                events_summary.append(f"error: {event.message}")
+                yield {"event": "error", "data": json.dumps({"message": event.message})}
 
-    if error_message and not events_summary[:-1]:  # only the error event
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Investigation failed: {error_message}")
+        detail = _load_incident_detail(db, incident_id, current_user.id)
+        done = InvestigateResponse(incident=IncidentDetailOut.model_validate(detail), events_summary=events_summary)
+        yield {"event": "done", "data": done.model_dump_json()}
 
-    # Reload with full detail for the response
-    detail = _load_incident_detail(db, incident_id, current_user.id)
-    return InvestigateResponse(incident=detail, events_summary=events_summary)
+    return EventSourceResponse(event_stream())
 
 
 def _get_proposed_action(db: Session, incident_id: uuid.UUID, action_id: uuid.UUID) -> ToolCall:
