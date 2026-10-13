@@ -10,13 +10,21 @@ import type { IncidentOut, ScenarioOut } from "@/lib/types";
 function DashboardContent() {
   const router = useRouter();
   const [incidents, setIncidents] = useState<IncidentOut[] | null>(null);
+  const [incidentsError, setIncidentsError] = useState<string | null>(null);
   const [scenarios, setScenarios] = useState<ScenarioOut[] | null>(null);
   const [selectedScenario, setSelectedScenario] = useState("");
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    api.listIncidents().then(setIncidents).catch(() => setIncidents([]));
+    setIncidentsError(null);
+    api
+      .listIncidents()
+      .then(setIncidents)
+      .catch((err) => {
+        setIncidents([]);
+        setIncidentsError(err instanceof api.ApiError ? err.message : "Could not load your incidents.");
+      });
   }, []);
 
   useEffect(() => {
@@ -110,6 +118,8 @@ function DashboardContent() {
         </h2>
         {incidents === null ? (
           <p className="mt-3 text-sm text-slate-400">Loading…</p>
+        ) : incidentsError ? (
+          <p className="mt-3 text-sm text-red-600">{incidentsError}</p>
         ) : incidents.length === 0 ? (
           <p className="mt-3 text-sm text-slate-400">
             No incidents yet, trigger one above to see Sentra investigate.
