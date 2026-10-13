@@ -80,7 +80,16 @@ function AuditLogContent() {
                 <Fragment key={entry.id}>
                   <tr
                     onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}
-                    className="cursor-pointer hover:bg-slate-50"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setExpanded(expanded === entry.id ? null : entry.id);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={expanded === entry.id}
+                    className="cursor-pointer hover:bg-slate-50 focus:bg-slate-50 focus:outline focus:outline-2 focus:outline-offset-[-2px] focus:outline-slate-400"
                   >
                     <td className="whitespace-nowrap px-4 py-2 text-slate-500">
                       {new Date(entry.created_at).toLocaleString()}
