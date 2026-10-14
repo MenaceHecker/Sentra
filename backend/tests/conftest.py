@@ -14,6 +14,7 @@ import sqlalchemy as sa  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.rate_limit import limiter  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
@@ -71,6 +72,11 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
     def _get_db_override() -> Generator[Session, None, None]:
         yield db_session
 
+    # The rate limiter's in-memory counters live for the whole test process,
+    # not just one test. Resetting here means every test starts with a full
+    # allowance regardless of what earlier tests did against the same key
+    # (TestClient requests all share one fake client address).
+    limiter.reset()
     app.dependency_overrides[get_db] = _get_db_override
     with TestClient(app) as test_client:
         yield test_client
