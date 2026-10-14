@@ -16,13 +16,17 @@ Phase 7 additions:
 Phase 9 additions:
   - POST /{id}/investigate now streams over SSE instead of blocking for the
     whole investigation and returning one JSON blob at the end.
+
+Phase 10 additions:
+  - POST "" and POST /{id}/investigate are rate-limited (see app/rate_limit.py);
+    investigate especially, since every call spends real LLM money.
 """
 
 import json
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session, selectinload
 from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import iterate_in_threadpool
@@ -32,6 +36,7 @@ from app.audit import write_audit, write_status_change
 from app.db import get_db
 from app.deps import get_current_user
 from app.models import AuditLog, Hypothesis, Incident, ToolCall, User
+from app.rate_limit import limiter
 from app.schemas import AuditLogOut, IncidentCreate, IncidentDetailOut, IncidentOut, InvestigateResponse, ToolCallOut
 from app.tools.executor import execute_approved_call
 
@@ -56,7 +61,9 @@ def _load_incident_detail(db: Session, incident_id: uuid.UUID, user_id: uuid.UUI
 
 
 @router.post("", response_model=IncidentOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
 def create_incident(
+    request: Request,
     payload: IncidentCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -110,7 +117,9 @@ def _hypothesis_event_payload(event: HypothesisEvent) -> dict:
 
 
 @router.post("/{incident_id}/investigate")
+@limiter.limit("10/minute")
 async def investigate_incident(
+    request: Request,
     incident_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
