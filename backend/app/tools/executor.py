@@ -82,6 +82,12 @@ def execute_approved_call(db: Session, call: ToolCall) -> ToolCall:
     not commit, the caller controls that transaction so the approval
     decision, the execution outcome, and the incident status update all
     land together or not at all."""
+    if call.status != "approved":
+        # The one caller that exists always sets this first, but this isn't
+        # just trusting that: it's the actual boundary the approval gate
+        # rests on, so it has to hold even if a future call site forgets to.
+        raise ValueError(f"cannot execute a tool call that hasn't been approved (status: {call.status})")
+
     tool = TOOLS[call.tool_name]
     validated_input = tool.input_model.model_validate(json.loads(call.tool_input_json))
 
