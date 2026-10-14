@@ -159,6 +159,7 @@ def test_execute_approved_call_runs_the_real_implementation(
         db_session, incident.id, "rollback_deploy", {"service": "checkout-service", "target_sha": "a1", "reason": "r"}
     )
     assert call.status == "proposed"  # sanity check: call_tool itself never runs this
+    call.status = "approved"  # what the approve endpoint does before calling execute_approved_call
 
     execute_approved_call(db_session, call)
 
@@ -185,8 +186,31 @@ def test_execute_approved_call_records_failure_instead_of_raising(
     call = call_tool(
         db_session, incident.id, "rollback_deploy", {"service": "checkout-service", "target_sha": "a1", "reason": "r"}
     )
+    call.status = "approved"
 
     execute_approved_call(db_session, call)
 
     assert call.status == "failed"
     assert "simulated system unreachable" in json.loads(call.tool_output_json)["error"]
+
+
+def test_execute_approved_call_refuses_to_run_without_approval(db_session: Session) -> None:
+    """Phase 10 defense-in-depth: execute_approved_call enforces its own
+    name. The one real caller (the approve endpoint) always sets status to
+    "approved" first, but that's the actual security boundary the approval
+    gate rests on, not an implementation detail, so it has to hold even if
+    called directly on a call that's still just "proposed"."""
+    from app.tools.executor import execute_approved_call
+
+    seed_services(db_session)
+    incident = _make_incident(db_session)
+    call = call_tool(
+        db_session, incident.id, "rollback_deploy", {"service": "checkout-service", "target_sha": "a1", "reason": "r"}
+    )
+    assert call.status == "proposed"
+
+    with pytest.raises(ValueError, match="hasn't been approved"):
+        execute_approved_call(db_session, call)
+
+    assert call.status == "proposed"
+    assert call.tool_output_json is None
