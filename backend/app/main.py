@@ -5,6 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
 from app.config import get_settings
@@ -12,6 +15,7 @@ from app.db import SessionLocal, engine
 from app.embeddings import get_embedding_provider
 from app.ingestion.pipeline import run_ingestion_cycle
 from app.ingestion.sim_client import SimSystemClient
+from app.rate_limit import limiter
 from app.routers import audit, auth, incidents, runbooks, scenarios
 from app.runbooks import ingest_all_runbooks
 from app.seed import seed_services
@@ -70,6 +74,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.include_router(auth.router)
 app.include_router(incidents.router)
