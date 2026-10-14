@@ -110,7 +110,7 @@ pre-commit install
 - [x] Phase 7 — Audit log
 - [x] Phase 8 — Investigation UI
 - [x] Phase 9 — Streaming + polish
-- [ ] Phase 10 — Security + reliability
+- [x] Phase 10 — Security + reliability
 - [ ] Phase 11 — Evaluation
 - [ ] Phase 12 — Deployment
 - [ ] Phase 13 — Portfolio packaging
