@@ -20,7 +20,7 @@
 | 8 | Investigation UI | ✅ Done | Reviewer can trigger seeded incident and watch it live |
 | 9 | Streaming + Polish | ✅ Done | Investigation feels live, not spinner-then-dump |
 | 10 | Security + Reliability | ✅ Done | Auth audit, rate limiting, prompt-injection tests, approval-gate bypass tests pass |
-| 11 | Evaluation | 🔲 Not started | 5–8 scenario benchmark with real numbers in README |
+| 11 | Evaluation | ✅ Done | 5–8 scenario benchmark with real numbers in README |
 | 12 | Deployment | 🔲 Not started | Public demo works end-to-end with no developer assistance |
 | 13 | Portfolio Packaging | 🔲 Not started | README with architecture diagram, demo video, evaluation results, tradeoffs |
 
@@ -225,24 +225,28 @@
 
 ---
 
-### 🔲 Phase 11 — Evaluation
+### ✅ Phase 11 — Evaluation
 
 **Checkpoint:** real, reproducible numbers in the README.
 
-- [ ] 5–8 seeded incident scenarios defined with known root causes
-  - [ ] `checkout-500s` — bad deploy to checkout-service
-  - [ ] `payments-latency` — upstream dependency slow
-  - [ ] `inventory-db-lock` — database lock contention
-  - [ ] *(add more as scenarios are designed)*
-- [ ] Evaluation harness: trigger each scenario, run investigation, capture hypothesis + citations
-- [ ] Metrics measured per scenario:
-  - [ ] Root-cause identification accuracy (correct / incorrect / partial)
-  - [ ] Citation accuracy (every cited log/metric/deploy/runbook is real and relevant)
-  - [ ] Confidence calibration (high-confidence hypotheses are more often correct)
-  - [ ] Time from incident creation to first hypothesis
-  - [ ] Token usage and estimated cost per investigation
-  - [ ] Approval-gate bypass attempts (should always be 0)
-- [ ] Results table written into `README.md` — **real numbers only, no fabricated metrics**
+- [x] 6 seeded incident scenarios defined with known root causes (`simulated-system/app/scenarios.py`) — deliberately 2 per service, one deploy-caused and one not, so the model has to actually distinguish causes, not just blame the most recent deploy
+  - [x] `checkout-500s` — bad deploy to checkout-service (missing `shipping_method`)
+  - [x] `checkout-slow-carrier` — slow external shipping-rate carrier, not a deploy
+  - [x] `payments-timeout` — deploy shrank the provider connection pool
+  - [x] `payments-bad-credentials` — stale API credential, not a deploy
+  - [x] `inventory-oom` — deploy introduced an unbounded cache (memory leak)
+  - [x] `inventory-db-lock` — external lock contention, not a deploy (spec's own suggested name)
+  - [x] Extended each service's runbook with a matching "Known issues" entry for its new scenario, so citation-grounding is testable for all 6, not just the original 3
+- [x] Evaluation harness (`backend/evaluation/run_eval.py`) — drives the real backend + simulated system over HTTP exactly like a reviewer clicking through the UI (register, inject, create incident, investigate, read back). No internals reached into directly
+- [x] Metrics measured per scenario, 12 real investigations (6 scenarios × 2 runs) against the real Gemini API:
+  - [x] Root-cause identification accuracy — 12/12 correct, via a simple fixed keyword rubric defined in the harness before any run happened
+  - [x] Citation accuracy — 12/12 runs had 100% structurally valid citations (every evidence id resolves to a real row from a real executed tool call in that investigation)
+  - [x] Confidence calibration — measured and honestly reported as not meaningful from this sample: all 12 runs were both "high confidence" and "correct", no spread to calibrate against
+  - [x] Time from incident creation to first hypothesis — avg 24.1s, min 9.0s, max 52.4s
+  - [x] Token usage and estimated cost per investigation — avg ~26,467 tokens/investigation, ~$0.009/investigation at published paid-tier pricing (actual cost was $0, free tier)
+  - [x] Approval-gate bypass attempts — 0 across all 12 runs, checked structurally against every tool call, not sampled
+- [x] Results table written into `README.md`, raw per-run data committed at `backend/evaluation/results.json` — **real numbers only, no fabricated metrics**
+- [x] Real bug found and fixed by the evaluation itself: the harness's scenario-reset call hit a backend endpoint that didn't exist (`POST /api/scenarios/{id}/reset`, previously internal-only via the remediation tools), silently 404ing, so deploy history piled up across back-to-back scenario injections. This caused one `inventory-db-lock` run to cite an unrelated stale deploy from an earlier `inventory-oom` run. Added the endpoint for real (`app/routers/scenarios.py`, tested), verified live, documented the specific bad run in the README rather than quietly re-running until it looked clean
 
 ---
 
@@ -316,6 +320,10 @@
 | Investigate endpoint always sends a final `done` event with the full incident, even after an `error` event | Errors happen mid-stream, after the HTTP status is already committed to 200, so there's no response left to fail outright the way the old synchronous endpoint's 502 did. Always syncing the client to real DB state on stream end, success or failure, is simpler than the client guessing whether to re-fetch | 9 |
 | Rate limiter's `key_style` set to `"endpoint"` instead of slowapi's default `"url"` | Default scopes a limit by the exact resolved request path. For a route with a path param like `/{incident_id}/investigate`, that means every distinct incident gets its own counter and the limit never actually trips, found this live while verifying the limiter actually worked, not from reading the docs | 10 |
 | Ownership checks return 404, not 403, everywhere (kept, not changed, in Phase 10) | Predates this phase (Phase 5/6 convention), re-confirmed consistent across every router during the Phase 10 audit; a 403 would confirm a resource id exists at all to someone probing for them, a 404 doesn't | 10 |
+| 6 evaluation scenarios reusing the 3 existing services (2 each) instead of adding a 4th service | Spec wanted 5–8; doubling up on existing services with a deploy-caused and a non-deploy failure each gets real variety (tests whether the model distinguishes causes instead of pattern-matching "blame the last deploy") without the extra seed/ingestion/generator plumbing a new service would need | 11 |
+| Root-cause grading via a small fixed keyword rubric defined in the harness before any run, not an LLM-as-judge | Keeps the evaluation itself deterministic and auditable, no second nondeterministic LLM call whose own correctness would need evaluating. Traded rigor for transparency: the README says plainly it's a keyword check, not NLP grading, and shows the one case (inventory-db-lock run #2) where that simplicity let a real mistake through | 11 |
+| Evaluation harness hits the real HTTP API (register → inject → create incident → investigate → read back), never reaches into backend internals directly | What it measures should be exactly what a real reviewer using the UI gets, not a shortcut that could diverge from real behavior | 11 |
+| The one bad run (`inventory-db-lock` #2 citing a stale deploy) was documented, not re-run until clean | The point of an evaluation is to find real problems; quietly re-running past an inconvenient result would defeat that and violate "real numbers only, no fabricated metrics." The root cause (missing scenario-reset endpoint) was fixed for future runs, but the original 12-run dataset stands as recorded | 11 |
 | *(add more as they arise)* | | |
 
 ---
@@ -327,4 +335,4 @@
 - [x] LLM provider for Phase 5 — decided: OpenAI (`backend/app/agent/provider.py`), via native function-calling.
 - [x] SSE vs. WebSocket for Phase 9 streaming — went with SSE: the investigation stream is unidirectional (server → client), and the browser's native reconnect/simplicity benefits of SSE aren't even in play here since the custom `fetch()`-based consumer was needed anyway for the `Authorization` header.
 - [ ] Deployment platform for backend + simulated system — Railway vs. Fly.io? (Fly.io gives more control over multi-service; Railway is simpler setup.)
-- [ ] Number and exact set of evaluation scenarios for Phase 11 — spec says 5–8; decide before Phase 11.
+- [x] Number and exact set of evaluation scenarios for Phase 11 — decided: 6, two per existing service (deploy-caused + non-deploy), reusing the 3 services rather than adding a 4th purely for scenario count.
