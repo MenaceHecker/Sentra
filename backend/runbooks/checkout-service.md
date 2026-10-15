@@ -12,6 +12,7 @@ error rate here shows up immediately as failed purchases.
 
 - payments-service (synchronous call, blocks the checkout response)
 - inventory-service (synchronous call, blocks the checkout response)
+- shipping-rate-carrier (external, synchronous call, blocks the checkout response)
 - Postgres `orders` table
 
 ## Normal operating range
@@ -44,12 +45,33 @@ checkout request schema or order creation code before looking anywhere
 else. The fix is almost always either rolling back that deploy or shipping
 a hotfix that defaults `shipping_method` when absent.
 
+### Slow shipping-rate carrier
+
+Symptom: `Timeout calling shipping-rate-carrier after 8000ms for order
+{order_id}`, `Slow response from shipping-rate-carrier: 6500ms for order
+{order_id}`, or `CheckoutLatencyWarning: shipping rate lookup exceeded
+SLA for order {order_id}`. Latency climbs sharply, often five times
+normal, while the error rate only moves a little, most requests still
+eventually succeed, just slowly.
+
+Root cause: the shipping-rate carrier checkout calls out to for live
+shipping quotes has gotten slow on their end. This is not caused by a
+deploy here, nothing in checkout-service's own code or config changed.
+Check deploy history anyway to rule it out, but expect to find nothing
+recent.
+
+There's no fix on our side beyond waiting it out or, if it's prolonged,
+falling back to cached/flat-rate shipping estimates instead of a live
+carrier lookup.
+
 ### Elevated latency without elevated errors
 
-If latency climbs but the error rate stays flat, suspect payments-service
-or inventory-service slowness rather than checkout-service itself, since
-both downstream calls are synchronous and block the checkout response.
-Check their metrics before assuming the problem is here.
+If latency climbs but the error rate stays flat or only moves a little,
+suspect payments-service, inventory-service, or the shipping-rate
+carrier rather than checkout-service itself, since all three downstream
+calls are synchronous and block the checkout response. Check their
+metrics (and, for the carrier, the known issue above) before assuming
+the problem is here.
 
 ## Escalation
 
