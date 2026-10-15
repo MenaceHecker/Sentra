@@ -57,6 +57,11 @@ def test_inject_requires_authentication(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def test_reset_requires_authentication(client: TestClient) -> None:
+    response = client.post("/api/scenarios/checkout-500s/reset")
+    assert response.status_code == 401
+
+
 def test_list_scenarios_proxies_the_simulated_system(
     client: TestClient, register: Callable[[str, str], dict[str, str]], fake_sim_client: FakeSimSystemClient
 ) -> None:
@@ -80,6 +85,20 @@ def test_inject_scenario_proxies_and_returns_the_deploy(
     assert body["scenario_id"] == "checkout-500s"
     assert body["deploy"]["sha"] == "abc1234"
     assert fake_sim_client.inject_scenario_calls == ["checkout-500s"]
+
+
+def test_reset_scenario_proxies_to_the_simulated_system(
+    client: TestClient, register: Callable[[str, str], dict[str, str]], fake_sim_client: FakeSimSystemClient
+) -> None:
+    """Phase 11: added so the evaluation harness (and anything else that
+    needs to restore a service to healthy between scenarios) has a real
+    endpoint to call, instead of each scenario's deploy/log history just
+    piling up forever across runs."""
+    headers = register("alice@example.com")
+    response = client.post("/api/scenarios/checkout-500s/reset", headers=headers)
+
+    assert response.status_code == 204
+    assert fake_sim_client.reset_scenario_calls == ["checkout-500s"]
 
 
 def test_unknown_scenario_returns_the_sim_systems_404(
