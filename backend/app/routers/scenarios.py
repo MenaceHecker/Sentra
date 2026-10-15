@@ -4,6 +4,13 @@ never talks to the simulated system directly, per the architecture
 diagram in the README, so this is the one place that HTTP hop happens
 for scenario listing/injection. Not incident-scoped: a scenario is
 shared, global demo-system state, not owned by any one user or incident.
+
+Phase 11 addition: /reset, so a scenario can be cleared back to healthy
+without a deploy/log history pileup across repeated runs. The Phase 11
+evaluation harness is what surfaced the gap: without this, consecutive
+scenarios on the same service kept stacking deploy history, which once
+caused a hypothesis to cite a stale, unrelated deploy (see
+evaluation/README or docs/progress.md Phase 11 notes).
 """
 
 import functools
@@ -54,5 +61,15 @@ def inject_scenario(scenario_id: str, current_user: User = Depends(get_current_u
     client = SimSystemClient()
     try:
         return client.inject_scenario(scenario_id)
+    finally:
+        client.close()
+
+
+@router.post("/{scenario_id}/reset", status_code=status.HTTP_204_NO_CONTENT)
+@_proxy_sim_system_errors
+def reset_scenario(scenario_id: str, current_user: User = Depends(get_current_user)) -> None:
+    client = SimSystemClient()
+    try:
+        client.reset_scenario(scenario_id)
     finally:
         client.close()
