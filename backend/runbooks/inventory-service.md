@@ -48,6 +48,28 @@ restart occasionally for unrelated reasons. This issue specifically
 looks like a slow climb in error rate and latency over several minutes
 before the restart, then a partial recovery that starts climbing again.
 
+### Reservations stuck on database lock contention
+
+Symptom: `Lock wait timeout exceeded for inventory reservation on order
+{order_id}`, `DeadlockDetected: inventory row lock held too long,
+retrying order {order_id}`, or `Database query timeout (30000ms)
+reserving stock for order {order_id}`. Latency spikes hard, often six
+times normal or worse, with error rate climbing alongside it as queued
+reservations eventually time out.
+
+Root cause: something else is holding row locks on the inventory table
+for too long, most often a long-running reporting or batch query, so
+normal checkout-time stock reservations queue up waiting for a lock
+that doesn't free up in time. This is not caused by a deploy, deploy
+history will usually show nothing recent.
+
+Check for any long-running query against the inventory table (a report,
+a batch job, an ad-hoc query someone's running) before assuming this is
+the cache-leak issue above, the log signature is different: this one
+mentions locks and deadlocks explicitly, the cache-leak issue doesn't.
+The fix is killing or rescheduling whatever's holding the lock, not
+anything in inventory-service's own code.
+
 ## Escalation
 
 Out-of-stock false negatives during this incident (reservations failing
