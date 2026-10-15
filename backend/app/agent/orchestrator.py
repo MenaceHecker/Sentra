@@ -48,6 +48,7 @@ from app.agent.context import format_tool_result_for_context
 from app.agent.prompts import build_initial_messages, build_tool_schemas
 from app.agent.provider import ProviderResponse, call_llm
 from app.audit import write_audit, write_status_change
+from app.config import get_settings
 from app.models import Evidence, Hypothesis, HypothesisCitation, Incident, ToolCall
 from app.tools.executor import call_tool
 
@@ -226,6 +227,7 @@ def run_investigation(
     between yields — we flush after every write and do a final commit at
     the end.
     """
+    settings = get_settings()
     incident_id = incident.id
     logger.info("Investigation started | incident_id=%s", incident_id)
 
@@ -262,6 +264,25 @@ def run_investigation(
             db.commit()
             yield ErrorEvent(message=f"LLM error: {exc}")
             return
+
+        # Recorded per call, not just totalled at the end, so the audit log
+        # alone (same place every other per-turn fact lives) is enough to
+        # reconstruct token usage and cost for an investigation, Phase 11's
+        # evaluation harness reads these back rather than needing its own
+        # instrumentation.
+        write_audit(
+            db,
+            incident_id,
+            "system",
+            "llm_call",
+            {
+                "iteration": iterations,
+                "provider": settings.llm_provider,
+                "model": settings.gemini_model if settings.llm_provider.lower() == "gemini" else settings.llm_model,
+                "prompt_tokens": response.prompt_tokens,
+                "completion_tokens": response.completion_tokens,
+            },
+        )
 
         # No tool calls → model is done, go to hypothesis parsing
         if not response.tool_calls:
