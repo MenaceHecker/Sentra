@@ -65,4 +65,58 @@ SCENARIOS: dict[str, Scenario] = {
         ],
         deploy_message="Cache stock-reservation lookups in memory",
     ),
+    "checkout-slow-carrier": Scenario(
+        id="checkout-slow-carrier",
+        title="Checkout latency spike from a slow shipping carrier",
+        service="checkout-service",
+        description=(
+            "The shipping-rate carrier checkout calls out to synchronously has gotten "
+            "slow, so checkout latency climbs sharply while the error rate barely moves. "
+            "Not a deploy, no code here changed."
+        ),
+        error_rate=0.06,
+        latency_multiplier=5.0,
+        error_log_messages=[
+            "Timeout calling shipping-rate-carrier after 8000ms for order {order_id}",
+            "Slow response from shipping-rate-carrier: 6500ms for order {order_id}",
+            "CheckoutLatencyWarning: shipping rate lookup exceeded SLA for order {order_id}",
+        ],
+        deploy_message=None,
+    ),
+    "payments-bad-credentials": Scenario(
+        id="payments-bad-credentials",
+        title="Payments provider rejecting every request",
+        service="payments-service",
+        description=(
+            "A rotated API credential was never updated in payments-service's config, "
+            "so the payment provider rejects nearly every request outright. Requests "
+            "fail fast rather than hang, latency stays close to normal."
+        ),
+        error_rate=0.9,
+        latency_multiplier=1.2,
+        error_log_messages=[
+            "401 Unauthorized calling payment-provider for charge {order_id}: invalid API credentials",
+            "AuthenticationError: payment-provider rejected request, check API key configuration",
+            "Payment provider returned invalid_api_key for order {order_id}",
+        ],
+        deploy_message=None,
+    ),
+    "inventory-db-lock": Scenario(
+        id="inventory-db-lock",
+        title="Inventory reservations stuck on database lock contention",
+        service="inventory-service",
+        description=(
+            "A long-running reporting query is holding row locks on the inventory "
+            "table, so checkout-time stock reservations queue up waiting for locks "
+            "and start timing out. Not a deploy, no recent code change caused this."
+        ),
+        error_rate=0.25,
+        latency_multiplier=6.0,
+        error_log_messages=[
+            "Lock wait timeout exceeded for inventory reservation on order {order_id}",
+            "DeadlockDetected: inventory row lock held too long, retrying order {order_id}",
+            "Database query timeout (30000ms) reserving stock for order {order_id}",
+        ],
+        deploy_message=None,
+    ),
 }
