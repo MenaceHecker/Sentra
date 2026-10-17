@@ -2,7 +2,7 @@
 
 **AI incident copilot.**
 
-Connect your system's logs, metrics, and runbooks. When something breaks,
+It Connect your system's logs, metrics, and runbooks. When something breaks,
 Sentra investigates via autonomous read-only tool calls, produces an
 evidence-cited root-cause hypothesis, and proposes next actions but no
 side-effecting action ever executes without explicit human approval.
