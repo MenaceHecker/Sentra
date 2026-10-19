@@ -2,12 +2,14 @@
 
 **AI incident copilot.**
 
-It Connect your system's logs, metrics, and runbooks. When something breaks,
+Connect your system's logs, metrics, and runbooks. When something breaks,
 Sentra investigates via autonomous read-only tool calls, produces an
-evidence-cited root-cause hypothesis, and proposes next actions but there are no
+evidence-cited root-cause hypothesis, and proposes next actions, but no
 side-effecting action ever executes without explicit human approval.
 
 > Status: early build — see [Roadmap](#roadmap) for what's done vs. planned.
+
+**Live demo:** [frontend-menaceheckers-projects.vercel.app](https://frontend-menaceheckers-projects.vercel.app) — sign up, pick a seeded scenario, and watch a real investigation run against the real Gemini API. No setup needed.
 
 ## Architecture
 
@@ -189,7 +191,7 @@ documented rather than quietly re-run until it looked clean. The original
 - [x] Phase 9 — Streaming + polish
 - [x] Phase 10 — Security + reliability
 - [x] Phase 11 — Evaluation
-- [ ] Phase 12 — Deployment
+- [x] Phase 12 — Deployment
 - [ ] Phase 13 — Portfolio packaging
 
 ## License
