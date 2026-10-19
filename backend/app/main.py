@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="Sentra API",
     version="0.1.0",
-    description="AI incident copilot — evidence-grounded triage with a hard human approval gate.",
+    description="AI incident copilot: evidence-grounded triage with a hard human approval gate.",
     lifespan=lifespan,
 )
 

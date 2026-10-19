@@ -44,7 +44,7 @@ def format_metric_evidence(tool_output: dict[str, Any]) -> str:
         "TYPE: metric",
         f"SERVICE: {service}",
         f"METRIC: {metric}",
-        f"WINDOW: {points[0]['timestamp'] if points else 'N/A'} — {points[-1]['timestamp'] if points else 'N/A'}",
+        f"WINDOW: {points[0]['timestamp'] if points else 'N/A'} to {points[-1]['timestamp'] if points else 'N/A'}",
         f"MIN: {min_v:.4f}  MAX: {max_v:.4f}  AVG: {avg_v:.4f}" if values else "NO DATA",
         "DATA:",
     ]

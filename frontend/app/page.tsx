@@ -7,8 +7,8 @@ export default function Home() {
         <h1 className="text-5xl font-bold tracking-tight">Sentra</h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-600">
           Connect your system&apos;s logs, metrics, and runbooks. When something
-          breaks, Sentra investigates, shows its evidence, and — with your
-          approval — takes the safe next step.
+          breaks, Sentra investigates, shows its evidence, and takes the safe
+          next step with your approval.
         </p>
         <div className="mt-8 flex justify-center gap-4">
           <Link

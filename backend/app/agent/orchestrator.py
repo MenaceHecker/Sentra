@@ -1,4 +1,4 @@
-"""Agent orchestrator — the core of Sentra.
+"""Agent orchestrator, the core of Sentra.
 
 This module runs the LLM tool-calling loop for a single investigation:
 
@@ -224,7 +224,7 @@ def run_investigation(
     exhaust the generator: list(run_investigation(db, incident)).
 
     All DB writes happen inside this function.  The caller must not commit
-    between yields — we flush after every write and do a final commit at
+    between yields, we flush after every write and do a final commit at
     the end.
     """
     settings = get_settings()

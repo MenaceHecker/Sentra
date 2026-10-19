@@ -152,7 +152,7 @@ async def investigate_incident(
     if incident.status in ("resolved", "closed"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"Incident is already {incident.status} — create a new incident to re-investigate.",
+            f"Incident is already {incident.status}, create a new incident to re-investigate.",
         )
 
     async def event_stream():

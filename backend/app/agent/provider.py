@@ -2,11 +2,11 @@
 
 The orchestrator talks only to this module, never directly to the openai
 client.  Swapping providers means writing a new ProviderResponse-returning
-function and pointing get_provider() at it — no agent logic changes.
+function and pointing get_provider() at it, no agent logic changes.
 
 Supported providers (LLM_PROVIDER env var):
-  openai  — uses the OpenAI chat-completions API with native tool-calling
-  gemini  — uses the Gemini API (google-genai) with native tool-calling
+  openai  uses the OpenAI chat-completions API with native tool-calling
+  gemini  uses the Gemini API (google-genai) with native tool-calling
 """
 
 from __future__ import annotations
