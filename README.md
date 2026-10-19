@@ -10,7 +10,7 @@ side-effecting action ever executes without explicit human approval.
 > Status: MVP complete, deployed, and evaluated. See [Roadmap](#roadmap) for
 > phase-by-phase history and [What's next](#whats-next) for what's beyond it.
 
-**Live demo:** [frontend-menaceheckers-projects.vercel.app](https://frontend-menaceheckers-projects.vercel.app). Sign up, pick a seeded scenario, and watch a real investigation run against the real Gemini API. No setup needed.
+**Live demo:** [frontend-sable-six-42.vercel.app](https://frontend-sable-six-42.vercel.app). Sign up, pick a seeded scenario, and watch a real investigation run against the real Gemini API. No setup needed.
 
 ![Sentra: trigger a seeded incident, watch it investigate live, approve the proposed fix](docs/assets/demo.gif)
 
