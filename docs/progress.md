@@ -21,7 +21,7 @@
 | 9 | Streaming + Polish | ✅ Done | Investigation feels live, not spinner-then-dump |
 | 10 | Security + Reliability | ✅ Done | Auth audit, rate limiting, prompt-injection tests, approval-gate bypass tests pass |
 | 11 | Evaluation | ✅ Done | 5–8 scenario benchmark with real numbers in README |
-| 12 | Deployment | 🔲 Not started | Public demo works end-to-end with no developer assistance |
+| 12 | Deployment | ✅ Done | Public demo works end-to-end with no developer assistance |
 | 13 | Portfolio Packaging | 🔲 Not started | README with architecture diagram, demo video, evaluation results, tradeoffs |
 
 ---
@@ -250,19 +250,23 @@
 
 ---
 
-### 🔲 Phase 12 — Deployment
+### ✅ Phase 12 — Deployment
 
 **Checkpoint:** public demo works end to end with no developer assistance.
 
-- [ ] Frontend deployed to Vercel
-- [ ] Backend deployed to Railway / Render / Fly.io
-- [ ] Simulated system deployed alongside backend (same platform or separate service)
-- [ ] Database: Supabase Postgres (or equivalent managed Postgres + pgvector)
-- [ ] Environment variables and secrets configured in each platform
-- [ ] CI/CD pipeline: merge to `main` → deploy
-- [ ] Health checks for backend (`GET /health`) and simulated system
-- [ ] Seeded demo data present on first startup (no manual setup for reviewer)
-- [ ] Public URL verified end-to-end with a clean browser session
+- [x] Frontend deployed to Vercel — project `frontend`, root directory `frontend/`, GitHub-connected to `MenaceHecker/Sentra` on `main` for auto-deploy
+- [x] Backend deployed to Railway — service `backend`, root directory `backend/`, same GitHub auto-deploy wiring
+- [x] Simulated system deployed alongside backend — service `simulated-system` in the same Railway project, reachable from the backend only over Railway's private network (`simulated-system.railway.internal`), no public domain, since the architecture never has anything but the backend talk to it
+- [x] Database: Supabase Postgres (session pooler, IPv4-compatible — direct connection defaults to IPv6-only, not guaranteed from Railway's egress)
+- [x] Environment variables and secrets configured in each platform — `JWT_SECRET` generated and piped directly into Railway, never displayed anywhere; `DATABASE_URL` and `GEMINI_API_KEY` set via stdin/local-file piping, never pasted into chat
+- [x] CI/CD pipeline: merge to `main` → deploy — both Railway services and the Vercel project are connected to GitHub with `main` as the deploy branch; first deploy for all three was triggered directly from a real `main` commit (not a local upload) to prove the pipeline itself works, not just that the code runs
+- [x] Health checks for backend (`GET /health`, `GET /ready`) and simulated system (`GET /health`) — all verified live
+- [x] Seeded demo data present on first startup — verified live: a fresh deploy seeds all 3 services and ingests all 3 runbooks into Supabase's pgvector automatically, no manual step
+- [x] Public URL verified end-to-end with a clean browser session — Playwright against the real public URLs: register → dashboard → trigger scenario → real investigation (real Gemini call) → approve a proposed action → audit log populated. All real, nothing mocked
+- [x] Dockerfile fixes needed for deployment (found via local `docker build`/`docker run` verification before ever touching Railway): backend's only copied `app/`, missing `alembic/`, `alembic.ini`, and `runbooks/` — migrations and runbook ingestion would have silently failed in prod. simulated-system had no Dockerfile at all
+- [x] Two real deployment bugs found and fixed during setup, documented honestly:
+  - Railway's GitHub-connected monorepo services default to building from the repo root with auto-detected Railpack, not the Dockerfile in the right subdirectory — fixed via the GraphQL API (`serviceInstanceUpdate`) to set `rootDirectory`/`dockerfilePath` explicitly per service, since the CLI doesn't expose this directly for a repo-connected service
+  - `DATABASE_URL` without the `+psycopg` driver suffix makes SQLAlchemy default to psycopg2 (not installed), crashing the backend on boot — caught from the crash log, fixed in place without needing the password re-entered
 
 ---
 
@@ -324,6 +328,10 @@
 | Root-cause grading via a small fixed keyword rubric defined in the harness before any run, not an LLM-as-judge | Keeps the evaluation itself deterministic and auditable, no second nondeterministic LLM call whose own correctness would need evaluating. Traded rigor for transparency: the README says plainly it's a keyword check, not NLP grading, and shows the one case (inventory-db-lock run #2) where that simplicity let a real mistake through | 11 |
 | Evaluation harness hits the real HTTP API (register → inject → create incident → investigate → read back), never reaches into backend internals directly | What it measures should be exactly what a real reviewer using the UI gets, not a shortcut that could diverge from real behavior | 11 |
 | The one bad run (`inventory-db-lock` #2 citing a stale deploy) was documented, not re-run until clean | The point of an evaluation is to find real problems; quietly re-running past an inconvenient result would defeat that and violate "real numbers only, no fabricated metrics." The root cause (missing scenario-reset endpoint) was fixed for future runs, but the original 12-run dataset stands as recorded | 11 |
+| Supabase session pooler (IPv4, port 5432) over direct connection | Supabase's own guidance: direct connection defaults to IPv6-only and Railway's outbound IPv6 support isn't guaranteed; session pooler is the documented IPv4-compatible alternative and still supports the persistent, long-lived connections a Railway container holds, unlike the transaction pooler (meant for stateless/serverless callers) | 12 |
+| simulated-system has no public domain, only Railway private networking | Nothing but the backend ever needs to reach it, per the architecture; a public domain for it would be unused attack surface, not a missing feature | 12 |
+| First deploy for every service triggered directly from the real `main` branch commit via each platform's API, not a local CLI upload | Proves the actual "merge to main → deploy" pipeline works, not just that the code runs. A local upload would have verified the code but not the GitHub-integration wiring the checkpoint actually asks for | 12 |
+| Secrets (JWT_SECRET, DATABASE_URL, GEMINI_API_KEY) set via stdin piping or direct local-file reads, never pasted into chat or shown in any tool output | Same security posture as the Phase 0 secret-handling incident: a production JWT signing key or DB password sitting in a conversation transcript is a real exposure, there's no reason to accept it when the CLI supports reading from stdin | 12 |
 | *(add more as they arise)* | | |
 
 ---
@@ -334,5 +342,5 @@
 
 - [x] LLM provider for Phase 5 — decided: OpenAI (`backend/app/agent/provider.py`), via native function-calling.
 - [x] SSE vs. WebSocket for Phase 9 streaming — went with SSE: the investigation stream is unidirectional (server → client), and the browser's native reconnect/simplicity benefits of SSE aren't even in play here since the custom `fetch()`-based consumer was needed anyway for the `Authorization` header.
-- [ ] Deployment platform for backend + simulated system — Railway vs. Fly.io? (Fly.io gives more control over multi-service; Railway is simpler setup.)
+- [x] Deployment platform for backend + simulated system — decided: Railway, two services in one project (`backend`, `simulated-system`), connected via private networking.
 - [x] Number and exact set of evaluation scenarios for Phase 11 — decided: 6, two per existing service (deploy-caused + non-deploy), reusing the 3 services rather than adding a 4th purely for scenario count.
